@@ -1,0 +1,108 @@
+services:
+  platform_api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: datathon-platform-api
+    ports:
+      - "8080:8000"
+    environment:
+      APP_ENV: local
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql://datathon:datathon@postgres:5432/datathon
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src:ro
+    command: uvicorn platform_api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  prefect-server:
+    image: prefecthq/prefect:3-python3.12
+    container_name: datathon-prefect-server
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_UI_URL: http://localhost:4200
+      PREFECT_API_URL: http://127.0.0.1:4200/api
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://datathon:datathon@postgres:5432/prefect
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
+
+  prefect-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: datathon-prefect-worker
+    environment:
+      APP_ENV: local
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql://datathon:datathon@postgres:5432/datathon
+      PREFECT_API_URL: http://prefect-server:4200/api
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prefect-server:
+        condition: service_started
+      prefect-deployments:
+        condition: service_completed_successfully
+    volumes:
+      - ./src:/app/src:ro
+      - ./data:/app/data
+    command: >
+      sh -c "until prefect work-pool ls >/dev/null 2>&1; do
+      echo 'Waiting for Prefect API...'; sleep 2; done
+      && prefect work-pool create --type process datathon-local || true
+      && prefect worker start --pool datathon-local"
+
+  prefect-deployments:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: datathon-prefect-deployments
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      PREFECT_WORK_POOL: datathon-local
+    depends_on:
+      prefect-server:
+        condition: service_started
+    command: ./scripts/register_prefect_deployments.sh
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: datathon-postgres
+    environment:
+      POSTGRES_DB: datathon
+      POSTGRES_USER: datathon
+      POSTGRES_PASSWORD: datathon
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datathon -d datathon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-init:
+    image: postgres:16-alpine
+    container_name: datathon-postgres-init
+    environment:
+      PGPASSWORD: datathon
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "psql -h postgres -U datathon -d datathon -tAc
+      \"select 1 from pg_database where datname = 'prefect'\"
+      | grep -q 1
+      || createdb -h postgres -U datathon prefect"
+
+volumes:
+  postgres_data:

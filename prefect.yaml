@@ -1,0 +1,35 @@
+name: datathon-ai-platform
+prefect-version: "3"
+
+build: null
+push: null
+
+pull:
+  - prefect.deployments.steps.set_working_directory:
+      directory: /app
+
+deployments:
+  - name: initial-ai4i-dataset
+    entrypoint: src/ingestion/flows.py:ingest_initial_ai4i_dataset
+    work_pool:
+      name: datathon-local
+      work_queue_name: default
+    parameters:
+      csv_path: data/raw/ai4i2020.csv
+    tags:
+      - ingestion
+      - ai4i
+      - initial
+
+  - name: incoming-ai4i-batches
+    entrypoint: src/ingestion/flows.py:ingest_incoming_ai4i_batches
+    work_pool:
+      name: datathon-local
+      work_queue_name: default
+    parameters:
+      incoming_dir: data/incoming
+      archive_dir: data/archive
+    tags:
+      - ingestion
+      - ai4i
+      - incoming

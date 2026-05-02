@@ -1,0 +1,15 @@
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.git
+.env
+data/raw
+data/incoming
+data/processed
+data/reference
+data/archive
+!data/raw/ai4i2020.csv
+*.db
+*.sqlite
