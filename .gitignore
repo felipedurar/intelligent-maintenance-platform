@@ -10,9 +10,12 @@ data/processed/*
 data/reference/*
 data/archive/*
 !data/raw/.gitkeep
+!data/raw/*.dvc
 !data/incoming/.gitkeep
 !data/processed/.gitkeep
+!data/processed/*.dvc
 !data/reference/.gitkeep
+!data/reference/*.dvc
 !data/archive/.gitkeep
 *.db
 *.sqlite
