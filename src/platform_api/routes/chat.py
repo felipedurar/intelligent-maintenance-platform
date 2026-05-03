@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from agent.orchestrator import AgentOrchestrator, get_agent_orchestrator
-from monitoring.metrics import elapsed_seconds, record_chat, timer_start
+from monitoring.metrics import (
+    elapsed_seconds,
+    record_chat,
+    record_security_guardrail,
+    timer_start,
+)
+from security.guardrails import blocked_chat_response, evaluate_input, sanitize_output
 
 router = APIRouter()
 
@@ -41,7 +47,24 @@ def chat(
     orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
 ) -> ChatResponse:
     started_at = timer_start()
-    result = orchestrator.answer(message=request.message, session_id=request.session_id)
+    decision = evaluate_input(request.message)
+    if not decision.allowed:
+        record_security_guardrail(action="blocked", category=decision.category)
+        result = blocked_chat_response(decision, session_id=request.session_id)
+        record_chat(
+            status="blocked",
+            latency_seconds=elapsed_seconds(started_at),
+            tool_calls=[],
+        )
+        return ChatResponse(**result)
+
+    result = orchestrator.answer(
+        message=decision.sanitized_message or request.message,
+        session_id=request.session_id,
+    )
+    result, sanitized = sanitize_output(result)
+    if sanitized:
+        record_security_guardrail(action="sanitized", category="output")
     tool_calls = result.get("tool_calls", [])
     record_chat(
         status=str(result.get("metadata", {}).get("status", "ok"))

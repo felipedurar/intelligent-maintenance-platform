@@ -219,6 +219,12 @@ Run the golden-set agent evaluation with deterministic checks:
 docker compose exec prefect-worker ./scripts/run_agent_evaluation.sh
 ```
 
+Run the deterministic security guardrail evaluation:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_security_evaluation.sh
+```
+
 Enable OpenAI LLM-as-judge when `OPENAI_API_KEY` is configured:
 
 ```bash
@@ -247,10 +253,23 @@ platform tools:
 - `get_active_model`
 - `predict_machine_failure`
 
+The chat route is protected by deterministic security guardrails before and after the agent:
+
+- prompt-injection blocking for attempts to override instructions or reveal hidden prompts/secrets;
+- topic restriction to predictive maintenance, AI4I, model operations, RAG, monitoring, deployment, and governance;
+- output sanitization for API keys, JWT-like tokens, database URLs, password/token fields, internal prompt leakage, and unsafe automation claims;
+- Prometheus counter `security_guardrail_events_total` for blocked and sanitized events.
+
 The agent evaluation golden set lives at:
 
 ```text
 data/golden_set/agent_eval.jsonl
+```
+
+Security adversarial examples live at:
+
+```text
+data/golden_set/security_eval.jsonl
 ```
 
 It evaluates the chat agent with:

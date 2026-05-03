@@ -56,6 +56,11 @@ RAG_SEARCH_LATENCY = Histogram(
     "RAG search endpoint latency in seconds.",
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
 )
+SECURITY_GUARDRAIL_EVENTS = Counter(
+    "security_guardrail_events_total",
+    "Total security guardrail events by action and category.",
+    labelnames=("action", "category"),
+)
 
 
 def timer_start() -> float:
@@ -87,3 +92,7 @@ def record_chat(status: str, latency_seconds: float, tool_calls: list[str]) -> N
 def record_rag_search(status: str, latency_seconds: float) -> None:
     RAG_SEARCH_REQUESTS.labels(status=status).inc()
     RAG_SEARCH_LATENCY.observe(latency_seconds)
+
+
+def record_security_guardrail(action: str, category: str) -> None:
+    SECURITY_GUARDRAIL_EVENTS.labels(action=action, category=category).inc()

@@ -57,3 +57,16 @@ python -m evaluation.agent_eval --judge --ragas --mlflow
 
 Reports are written to `evaluation/reports/agent_eval_latest.json` and
 `evaluation/reports/agent_eval_latest.md`.
+
+## Security Guardrail Evaluation
+
+`data/golden_set/security_eval.jsonl` contains adversarial prompts for prompt injection,
+secret extraction, topic restriction, and safe allowed-domain checks.
+
+Run it with:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_security_evaluation.sh
+```
+
+The latest report is written to `evaluation/reports/security_eval_latest.json`.
