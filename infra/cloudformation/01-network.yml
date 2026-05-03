@@ -100,7 +100,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: !Sub ${ProjectName}-sg-public
-      GroupDescription: ECS platform-api — inbound 8000 from internet
+      GroupDescription: ECS platform-api - inbound 8000 from internet
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -119,7 +119,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: !Sub ${ProjectName}-sg-private
-      GroupDescription: ECS internal services — no inbound from internet
+      GroupDescription: ECS internal services - no inbound from internet
       VpcId: !Ref VPC
       SecurityGroupEgress:
         - IpProtocol: -1
@@ -149,7 +149,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: !Sub ${ProjectName}-sg-efs
-      GroupDescription: EFS mount targets — NFS from ECS tasks
+      GroupDescription: EFS mount targets - NFS from ECS tasks
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
