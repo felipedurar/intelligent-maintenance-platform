@@ -7,7 +7,7 @@ API_SERVICE ?= platform_api
 WORKER_SERVICE ?= prefect-worker
 API_BASE_URL ?= http://localhost:8080
 
-.PHONY: help install-dev install-eval pre-commit-install pre-commit-run format lint type security test quality coverage docker-config build up down logs ps shell-api shell-worker ingest train rag-index drift agent-eval security-eval prediction-smoke clean
+.PHONY: help install-dev install-eval install-torch-cpu pre-commit-install pre-commit-run format lint type security test quality coverage docker-config build up down logs ps shell-api shell-worker ingest train rag-index drift agent-eval security-eval prediction-smoke clean
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*##"; printf "\nDatathon AI Platform commands:\n\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-24s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -18,6 +18,9 @@ install-dev: ## Install project with development dependencies
 
 install-eval: ## Install optional RAGAS/evaluation dependencies
 	$(PIP) install -e ".[eval]"
+
+install-torch-cpu: ## Install CPU-only PyTorch for local MLP training
+	$(PIP) install "torch>=2.4.0,<3.0.0" --index-url https://download.pytorch.org/whl/cpu
 
 pre-commit-install: ## Install Git pre-commit hooks
 	pre-commit install

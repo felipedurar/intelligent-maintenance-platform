@@ -127,9 +127,11 @@ Current implementation:
 
 - baseline: class-balanced logistic regression with standard scaling.
 - challenger: class-balanced random forest.
+- deep challenger: PyTorch MLP with standardized tabular inputs, class-imbalance weighting, dropout, and early stopping when PyTorch is available in the training runtime.
 - selection metric: average precision first, then recall and F1 as tie-breakers.
 - registry name: `ai4i-machine-failure-classifier`.
 - serving alias: `champion`.
+- serving flavor: MLflow pyfunc wrapper returning `failure_probability`, so sklearn and PyTorch candidates share the same production serving contract.
 
 Required tags:
 

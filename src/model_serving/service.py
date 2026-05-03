@@ -5,7 +5,7 @@ from functools import cached_property
 from typing import Any
 
 import mlflow
-import mlflow.sklearn
+import mlflow.pyfunc
 import pandas as pd
 from mlflow.tracking import MlflowClient
 
@@ -31,7 +31,7 @@ class ModelServingService:
     @cached_property
     def model(self) -> Any:
         mlflow.set_tracking_uri(_tracking_uri())
-        return mlflow.sklearn.load_model(f"models:/{MODEL_NAME}@{CHAMPION_ALIAS}")
+        return mlflow.pyfunc.load_model(f"models:/{MODEL_NAME}@{CHAMPION_ALIAS}")
 
     @cached_property
     def model_version(self) -> str | None:
@@ -71,7 +71,7 @@ class ModelServingService:
                 }
             )
             x = features[FEATURE_COLUMNS]
-            probability = float(self.model.predict_proba(x)[0, 1])
+            probability = _extract_probability(self.model, x)
             return {
                 "status": "ok",
                 "failure_probability": probability,
@@ -109,3 +109,17 @@ _service = ModelServingService()
 
 def get_model_serving_service() -> ModelServingService:
     return _service
+
+
+def _extract_probability(model: Any, features: pd.DataFrame) -> float:
+    if hasattr(model, "predict_proba"):
+        return float(model.predict_proba(features)[0, 1])
+
+    prediction = model.predict(features)
+    if isinstance(prediction, pd.DataFrame):
+        if "failure_probability" in prediction.columns:
+            return float(prediction["failure_probability"].iloc[0])
+        return float(prediction.iloc[0, 0])
+    if isinstance(prediction, pd.Series):
+        return float(prediction.iloc[0])
+    return float(prediction[0])
