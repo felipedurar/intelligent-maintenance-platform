@@ -15,11 +15,12 @@ def default_database_url() -> str:
 def load_training_frame(database_url: str | None = None) -> pd.DataFrame:
     resolved_database_url = database_url or default_database_url()
     columns = ["udi", *FEATURE_COLUMNS, TARGET_COLUMN, "batch_id"]
-    query = f"""
-        select {", ".join(columns)}
-        from ai4i_machine_features
-        order by udi
-    """
+    column_list = ", ".join(columns)
+    query = (
+        f"select {column_list} "  # nosec B608
+        "from ai4i_machine_features "
+        "order by udi"
+    )
 
     with psycopg.connect(resolved_database_url) as conn:
         frame = pd.read_sql(query, conn)

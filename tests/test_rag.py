@@ -1,4 +1,5 @@
 from rag.chunking import load_document_chunks
+from rag.indexer import RagIndexer
 from rag.retriever import RagRetriever
 
 
@@ -9,6 +10,8 @@ class FakeEmbeddingService:
 
 
 class FakeVectorStore:
+    collection = "unit-test-docs"
+
     def search(self, vector, limit=5):
         assert vector == [0.1, 0.2, 0.3]
         assert limit == 2
@@ -24,6 +27,24 @@ class FakeVectorStore:
                 },
             )()
         ]
+
+
+class FakeBatchEmbeddingService:
+    def embed_texts(self, texts: list[str]):
+        assert texts
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
+
+class FakeIndexVectorStore:
+    collection = "unit-test-docs"
+
+    def __init__(self) -> None:
+        self.upserted = 0
+
+    def upsert_chunks(self, chunks, vectors):
+        assert len(chunks) == len(vectors)
+        self.upserted += len(chunks)
+        return len(chunks)
 
 
 def test_load_document_chunks_reads_markdown_files(tmp_path) -> None:
@@ -48,3 +69,24 @@ def test_rag_retriever_returns_vector_store_hits() -> None:
 
     assert result["status"] == "ok"
     assert result["results"][0]["source"] == "docs/predictive-maintenance-model.md"
+
+
+def test_rag_indexer_chunks_embeds_and_upserts_markdown(tmp_path) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "architecture.md").write_text(
+        "# Architecture\n\nThe platform uses FastAPI, MLflow, Qdrant, and OpenAI.",
+        encoding="utf-8",
+    )
+    vector_store = FakeIndexVectorStore()
+    indexer = RagIndexer(
+        embedding_service=FakeBatchEmbeddingService(),
+        vector_store=vector_store,
+    )
+
+    result = indexer.index_paths(paths=["docs"], base_dir=tmp_path, batch_size=1)
+
+    assert result["status"] == "indexed"
+    assert result["chunk_count"] == 1
+    assert result["collection"] == "unit-test-docs"
+    assert vector_store.upserted == 1

@@ -10,7 +10,7 @@ from prefect import flow, get_run_logger, task
 
 from features.ai4i import build_ai4i_features
 from ingestion.loader import load_ai4i_csv
-from ingestion.repository import IngestionResult, upsert_ai4i_dataset
+from ingestion.repository import upsert_ai4i_dataset
 
 DEFAULT_INITIAL_DATASET = "data/raw/ai4i2020.csv"
 DEFAULT_INCOMING_DIR = "data/incoming"
