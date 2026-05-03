@@ -411,6 +411,8 @@ Resources:
               Value: datathon
             - Name: POSTGRES_USER
               Value: datathon
+            - Name: PGDATA
+              Value: /var/lib/postgresql/data/pgdata
           Secrets:
             - Name: POSTGRES_PASSWORD
               ValueFrom: !Sub

@@ -51,15 +51,12 @@ Resources:
     Type: AWS::EFS::AccessPoint
     Properties:
       FileSystemId: !Ref EFSFileSystem
-      PosixUser:
-        Uid: "999"
-        Gid: "999"
       RootDirectory:
         Path: /pgdata
         CreationInfo:
           OwnerUid: "999"
           OwnerGid: "999"
-          Permissions: "755"
+          Permissions: "700"
       AccessPointTags:
         - Key: Name
           Value: !Sub ${ProjectName}-ap-postgres
