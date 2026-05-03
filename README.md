@@ -230,6 +230,20 @@ Run the training pipeline directly after ingestion:
 docker compose exec prefect-worker ./scripts/run_training.sh
 ```
 
+The training flow registers the best model as an MLflow `candidate` with
+`approval_status=pending`. It does not update production serving by itself.
+
+Promote a reviewed candidate to the `champion` alias after benchmark and fairness artifacts
+have been generated:
+
+```bash
+docker compose exec prefect-worker ./scripts/promote_model.sh \
+  --approved-by "felipe" \
+  --reason "Benchmark and fairness reports reviewed for demo release"
+```
+
+You can promote a specific MLflow model version with `--version`.
+
 Run RAG indexing directly after setting `OPENAI_API_KEY`:
 
 ```bash
@@ -361,7 +375,12 @@ data/processed/ai4i_features_<batch_id>.csv
 data/processed/ai4i_features_latest.csv
 ```
 
-The training pipeline reads `ai4i_machine_features` from PostgreSQL, trains a baseline logistic-regression model and a challenger random-forest model, logs metrics/artifacts to MLflow, registers the best model as `ai4i-machine-failure-classifier`, and assigns the `champion` alias. The prediction endpoint loads that MLflow champion model.
+The training pipeline reads `ai4i_machine_features` from PostgreSQL, trains a baseline
+logistic-regression model and a challenger random-forest model, logs metrics/artifacts to
+MLflow, registers the best model as `ai4i-machine-failure-classifier`, and assigns the
+`candidate` alias. A separate human approval command checks benchmark and fairness reports,
+records `approved_by`, `approved_at`, and `promotion_reason`, then assigns the `champion`
+alias. The prediction endpoint loads that approved MLflow champion model.
 
 The training pipeline also trains a PyTorch MLP deep challenger when PyTorch is installed in
 the training runtime. All candidates are logged through a common MLflow pyfunc serving contract

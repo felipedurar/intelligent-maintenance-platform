@@ -29,7 +29,8 @@ for maintenance prioritization, not as an automatic shutdown or work-order appro
 - PyTorch MLP deep challenger when PyTorch is available in the training runtime.
 
 The training flow logs candidates to MLflow and registers the best model under
-`ai4i-machine-failure-classifier` with the `champion` alias.
+`ai4i-machine-failure-classifier` with the `candidate` alias. Production serving uses the
+separate `champion` alias only after human approval.
 
 ## Evaluation Evidence
 
@@ -62,5 +63,7 @@ Prometheus/Grafana operational metrics for the serving API.
 ## Approval Status
 
 MLflow model versions are tagged with governance metadata such as owner, risk level, candidate
-name, feature version, training data version, and approval status. Production serving loads the
-registered `champion` alias.
+name, feature version, training data version, and approval status. Training sets
+`approval_status=pending`; the promotion command records `approved_by`, `approved_at`, and
+`promotion_reason`, preserves the previous production model as `previous_champion`, and then
+updates the production `champion` alias.
