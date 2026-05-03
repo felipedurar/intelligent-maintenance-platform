@@ -87,6 +87,13 @@ make security-eval
 The repository also includes `.pre-commit-config.yaml` with file hygiene checks, Ruff
 format/lint, mypy, Bandit, and a pre-push pytest hook.
 
+PyTorch is used by the offline training worker for the MLP challenger. It is intentionally not
+installed in the online API image. For local MLP training outside Docker, install the CPU build:
+
+```bash
+make install-torch-cpu
+```
+
 The API and worker are separate runtime images:
 
 - `Dockerfile.api`: online FastAPI service for chat, predictions, RAG search, and metadata.
@@ -339,6 +346,11 @@ data/processed/ai4i_features_latest.csv
 ```
 
 The training pipeline reads `ai4i_machine_features` from PostgreSQL, trains a baseline logistic-regression model and a challenger random-forest model, logs metrics/artifacts to MLflow, registers the best model as `ai4i-machine-failure-classifier`, and assigns the `champion` alias. The prediction endpoint loads that MLflow champion model.
+
+The training pipeline also trains a PyTorch MLP deep challenger when PyTorch is installed in
+the training runtime. All candidates are logged through a common MLflow pyfunc serving contract
+that returns `failure_probability`, so the champion model can be sklearn or PyTorch without
+changing the prediction API.
 
 The monitoring flow compares `data/reference/ai4i_reference.csv` against
 `data/processed/ai4i_features_latest.csv` using PSI thresholds:

@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 import mlflow
-import mlflow.sklearn
+import mlflow.pyfunc
 from mlflow.tracking import MlflowClient
 from prefect import flow, get_run_logger, task
 from sklearn.ensemble import RandomForestClassifier
@@ -26,6 +26,14 @@ from training.constants import (
 )
 from training.data import default_database_url, load_training_frame
 from training.metrics import evaluate_classifier
+from training.model_wrappers import log_probability_model
+
+try:
+    from training.pytorch_mlp import TorchMLPClassifier as ImportedTorchMLPClassifier
+except ImportError:
+    _TorchMLPClassifier: Any = None
+else:
+    _TorchMLPClassifier = ImportedTorchMLPClassifier
 
 
 def default_mlflow_tracking_uri() -> str:
@@ -41,7 +49,7 @@ def _positive_probability(model: Any, x_test: Any) -> Any:
 
 
 def _candidate_models(random_state: int) -> dict[str, Any]:
-    return {
+    candidates: dict[str, Any] = {
         "baseline_logistic_regression": Pipeline(
             steps=[
                 ("scaler", StandardScaler()),
@@ -63,6 +71,16 @@ def _candidate_models(random_state: int) -> dict[str, Any]:
             n_jobs=-1,
         ),
     }
+    if _TorchMLPClassifier is not None:
+        candidates["deep_challenger_pytorch_mlp"] = _TorchMLPClassifier(
+            hidden_dims=(32, 16),
+            dropout=0.2,
+            learning_rate=0.003,
+            epochs=80,
+            patience=10,
+            random_state=random_state,
+        )
+    return candidates
 
 
 @task
@@ -102,6 +120,14 @@ def train_candidates(
                     "dataset": "AI4I 2020",
                     "target": TARGET_COLUMN,
                     "candidate": candidate_name,
+                    "model_type": "classification",
+                    "framework": "pytorch" if "pytorch" in candidate_name else "scikit-learn",
+                    "owner": "datathon-ai-platform",
+                    "risk_level": "medium",
+                    "approval_status": "candidate",
+                    "training_data_version": os.getenv("TRAINING_DATA_VERSION", "local-postgres"),
+                    "feature_version": "ai4i-v1",
+                    "git_sha": os.getenv("GIT_SHA", "local"),
                 }
             )
             mlflow.log_params(
@@ -132,7 +158,7 @@ def train_candidates(
                 mlflow.log_artifact(feature_path, artifact_path="metadata")
                 mlflow.log_artifact(confusion_path, artifact_path="metrics")
 
-            mlflow.sklearn.log_model(model, artifact_path="model")
+            log_probability_model(model, artifact_path="model")
 
             runs.append(
                 {
