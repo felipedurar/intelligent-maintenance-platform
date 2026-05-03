@@ -248,6 +248,18 @@ Run the deterministic security guardrail evaluation:
 docker compose exec prefect-worker ./scripts/run_security_evaluation.sh
 ```
 
+Generate the model benchmark report with at least three candidate configurations:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_model_benchmark.sh
+```
+
+Generate explainability and fairness artifacts:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_explainability_fairness.sh
+```
+
 Enable OpenAI LLM-as-judge when `OPENAI_API_KEY` is configured:
 
 ```bash
@@ -306,6 +318,10 @@ Reports are written to:
 ```text
 evaluation/reports/agent_eval_latest.json
 evaluation/reports/agent_eval_latest.md
+evaluation/reports/model_benchmark_latest.json
+evaluation/reports/model_benchmark_latest.md
+evaluation/reports/explainability_fairness_latest.json
+evaluation/reports/explainability_fairness_latest.md
 ```
 
 Run the automated tests locally after installing dev dependencies:
@@ -351,6 +367,12 @@ The training pipeline also trains a PyTorch MLP deep challenger when PyTorch is 
 the training runtime. All candidates are logged through a common MLflow pyfunc serving contract
 that returns `failure_probability`, so the champion model can be sklearn or PyTorch without
 changing the prediction API.
+
+The benchmark report compares logistic regression, random forest, extra trees, and PyTorch MLP
+when PyTorch is available. It ranks models by average precision first because machine failures
+are rare in AI4I, then by recall and F1. The explainability/fairness report trains the best
+candidate, computes permutation importance, and compares precision, recall, false positive
+rate, and false negative rate across `L`, `M`, and `H` product groups.
 
 The monitoring flow compares `data/reference/ai4i_reference.csv` against
 `data/processed/ai4i_features_latest.csv` using PSI thresholds:

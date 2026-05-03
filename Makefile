@@ -7,7 +7,7 @@ API_SERVICE ?= platform_api
 WORKER_SERVICE ?= prefect-worker
 API_BASE_URL ?= http://localhost:8080
 
-.PHONY: help install-dev install-eval install-torch-cpu pre-commit-install pre-commit-run format lint type security test quality coverage docker-config build up down logs ps shell-api shell-worker ingest train rag-index drift agent-eval security-eval prediction-smoke clean
+.PHONY: help install-dev install-eval install-torch-cpu pre-commit-install pre-commit-run format lint type security test quality coverage docker-config build up down logs ps shell-api shell-worker ingest train benchmark explainability rag-index drift agent-eval security-eval prediction-smoke clean
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*##"; printf "\nDatathon AI Platform commands:\n\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-24s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -79,6 +79,12 @@ ingest: ## Run initial AI4I ingestion directly
 
 train: ## Run model training directly
 	$(DOCKER_COMPOSE) exec $(WORKER_SERVICE) ./scripts/run_training.sh
+
+benchmark: ## Generate model benchmark report
+	$(DOCKER_COMPOSE) exec $(WORKER_SERVICE) ./scripts/run_model_benchmark.sh
+
+explainability: ## Generate explainability and fairness report
+	$(DOCKER_COMPOSE) exec $(WORKER_SERVICE) ./scripts/run_explainability_fairness.sh
 
 rag-index: ## Run RAG indexing directly
 	$(DOCKER_COMPOSE) exec $(WORKER_SERVICE) ./scripts/run_rag_indexing.sh

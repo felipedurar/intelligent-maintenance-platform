@@ -58,6 +58,40 @@ python -m evaluation.agent_eval --judge --ragas --mlflow
 Reports are written to `evaluation/reports/agent_eval_latest.json` and
 `evaluation/reports/agent_eval_latest.md`.
 
+## Model Benchmark
+
+`evaluation/model_benchmark.py` compares the predictive-maintenance candidates used by the
+training pipeline:
+
+- balanced logistic regression baseline;
+- class-balanced random forest challenger;
+- class-balanced extra trees benchmark challenger;
+- PyTorch MLP challenger when PyTorch is installed in the runtime.
+
+Run it with:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_model_benchmark.sh
+```
+
+Reports are written to `evaluation/reports/model_benchmark_latest.json` and
+`evaluation/reports/model_benchmark_latest.md`.
+
+## Explainability And Fairness
+
+`evaluation/explainability_fairness.py` trains the best candidate on the processed feature
+dataset, computes permutation feature importance, and evaluates metrics by AI4I product group
+(`L`, `M`, `H`).
+
+Run it with:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_explainability_fairness.sh
+```
+
+Reports are written to `evaluation/reports/explainability_fairness_latest.json` and
+`evaluation/reports/explainability_fairness_latest.md`.
+
 ## Security Guardrail Evaluation
 
 `data/golden_set/security_eval.jsonl` contains adversarial prompts for prompt injection,
