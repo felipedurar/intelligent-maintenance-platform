@@ -19,6 +19,7 @@ class RagSearchResult(BaseModel):
     text: str
     source: str
     score: float | None = None
+    metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class RagSearchResponse(BaseModel):
@@ -33,8 +34,8 @@ class RagSearchResponse(BaseModel):
     response_model=RagSearchResponse,
     summary="Search indexed documentation",
     description=(
-        "Searches project/governance documentation chunks. The current implementation is a "
-        "placeholder until chunking, embeddings, and vector database integration are added."
+        "Searches project/governance documentation chunks indexed in Qdrant using OpenAI "
+        "embeddings."
     ),
 )
 def search(

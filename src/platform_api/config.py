@@ -18,6 +18,16 @@ class Settings(BaseSettings):
         validation_alias="DATABASE_URL",
     )
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    openai_chat_model: str = Field(
+        default="gpt-4.1-mini",
+        validation_alias="OPENAI_CHAT_MODEL",
+    )
+    openai_embedding_model: str = Field(
+        default="text-embedding-3-small",
+        validation_alias="OPENAI_EMBEDDING_MODEL",
+    )
+    qdrant_url: str = Field(default="http://localhost:6333", validation_alias="QDRANT_URL")
+    rag_collection_name: str = Field(default="datathon_docs", validation_alias="RAG_COLLECTION_NAME")
     mlflow_tracking_uri: str = Field(
         default="http://localhost:5000",
         validation_alias="MLFLOW_TRACKING_URI",

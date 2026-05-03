@@ -9,6 +9,7 @@ The project now targets **predictive maintenance for industrial machines** using
 - Binary machine-failure prediction using AI4I process/sensor data.
 - Optional failure-mode diagnostics using `TWF`, `HDF`, `PWF`, `OSF`, and `RNF`.
 - MLflow experiment tracking and model registry.
+- Qdrant-backed RAG over project and governance documentation.
 - DVC dataset and golden-set versioning.
 - Cloud object storage for artifacts and DVC remotes.
 - FastAPI serving APIs.
@@ -76,6 +77,12 @@ The API and worker are separate runtime images:
 - `Dockerfile.worker`: offline Prefect worker for ingestion, feature builds, training, drift, and RAG indexing.
 - `Dockerfile.mlflow`: MLflow tracking server and model registry runtime.
 
+Qdrant UI/API:
+
+```text
+http://localhost:6333
+```
+
 Open the FastAPI docs:
 
 ```text
@@ -122,6 +129,7 @@ After startup, the Prefect UI should show these deployments:
 - `ingest-initial-ai4i-dataset/initial-ai4i-dataset`
 - `ingest-incoming-ai4i-batches/incoming-ai4i-batches`
 - `train-ai4i-failure-classifier/train-ai4i-failure-classifier`
+- `index-rag-documentation/index-rag-documentation`
 
 If you need to register them manually, run:
 
@@ -149,6 +157,12 @@ Trigger the registered training deployment:
 docker compose exec prefect-worker ./scripts/run_training_deployment.sh
 ```
 
+Trigger the registered RAG indexing deployment:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_rag_indexing_deployment.sh
+```
+
 Run the initial AI4I CSV ingestion directly:
 
 ```bash
@@ -165,6 +179,27 @@ Run the training pipeline directly after ingestion:
 
 ```bash
 docker compose exec prefect-worker ./scripts/run_training.sh
+```
+
+Run RAG indexing directly after setting `OPENAI_API_KEY`:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_rag_indexing.sh
+```
+
+The RAG pipeline chunks `README.md`, `AGENTS.md`, `docs/`, and `docs_governance/`, embeds
+the chunks with OpenAI embeddings, and upserts them into Qdrant. The `/api/v1/rag/search`
+endpoint queries that index. The `/api/v1/chat` endpoint uses OpenAI tool calling with these
+platform tools:
+
+- `search_project_docs`
+- `get_active_model`
+- `predict_machine_failure`
+
+The agent evaluation golden set lives at:
+
+```text
+data/golden_set/agent_eval.jsonl
 ```
 
 Run the automated tests locally after installing dev dependencies:

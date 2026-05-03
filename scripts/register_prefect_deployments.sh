@@ -21,3 +21,7 @@ prefect deploy src/ingestion/flows.py:ingest_incoming_ai4i_batches \
 prefect deploy src/training/train_model.py:train_ai4i_failure_classifier \
   --name train-ai4i-failure-classifier \
   --pool "$POOL_NAME"
+
+prefect deploy src/rag/flows.py:index_rag_documentation \
+  --name index-rag-documentation \
+  --pool "$POOL_NAME"

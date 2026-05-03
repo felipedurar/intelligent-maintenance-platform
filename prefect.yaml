@@ -45,3 +45,15 @@ deployments:
       - training
       - ai4i
       - mlflow
+
+  - name: index-rag-documentation
+    entrypoint: src/rag/flows.py:index_rag_documentation
+    work_pool:
+      name: datathon-local
+      work_queue_name: default
+    parameters:
+      base_dir: .
+    tags:
+      - rag
+      - indexing
+      - openai

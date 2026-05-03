@@ -1,8 +1,10 @@
 from fastapi.testclient import TestClient
 
+from agent.orchestrator import get_agent_orchestrator
 from model_serving.service import get_model_serving_service
 from platform_api.main import create_app
 from platform_api.routes import models
+from rag.retriever import get_rag_retriever
 
 
 class FakePredictionService:
@@ -23,6 +25,33 @@ class FakeMlflowClient:
 
     def get_model_version_by_alias(self, model_name, alias):
         return type("ModelVersion", (), {"version": "7"})()
+
+
+class FakeRagRetriever:
+    def search(self, query, limit=5):
+        return {
+            "query": query,
+            "status": "ok",
+            "results": [
+                {
+                    "text": "The model uses engineered AI4I process features.",
+                    "source": "docs/predictive-maintenance-model.md",
+                    "score": 0.9,
+                    "metadata": {"chunk_id": "docs/predictive-maintenance-model.md:0"},
+                }
+            ],
+            "message": "Found 1 documentation chunk.",
+        }
+
+
+class FakeAgentOrchestrator:
+    def answer(self, message, session_id=None):
+        return {
+            "answer": f"answered: {message}",
+            "tool_calls": ["search_project_docs"],
+            "sources": ["docs/predictive-maintenance-model.md"],
+            "metadata": {"session_id": session_id},
+        }
 
 
 def test_health_endpoint() -> None:
@@ -93,3 +122,30 @@ def test_active_model_endpoint_reads_mlflow_alias(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "active"
     assert response.json()["model_version"] == "7"
+
+
+def test_rag_search_endpoint_uses_retriever_override() -> None:
+    app = create_app()
+    app.dependency_overrides[get_rag_retriever] = lambda: FakeRagRetriever()
+    client = TestClient(app)
+
+    response = client.post("/api/v1/rag/search", json={"query": "features", "limit": 3})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["results"][0]["source"] == "docs/predictive-maintenance-model.md"
+
+
+def test_chat_endpoint_uses_agent_override() -> None:
+    app = create_app()
+    app.dependency_overrides[get_agent_orchestrator] = lambda: FakeAgentOrchestrator()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/chat",
+        json={"message": "What features are used?", "session_id": "unit-chat"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "answered: What features are used?"
+    assert response.json()["tool_calls"] == ["search_project_docs"]
