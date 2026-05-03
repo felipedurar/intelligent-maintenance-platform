@@ -1,0 +1,265 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  IM Platform — Storage stack:
+  EFS (5 access points), S3 buckets, Secrets Manager placeholders.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: intelligent-maintenance
+  Environment:
+    Type: String
+    Default: prod
+
+Resources:
+
+  # ── EFS ───────────────────────────────────────────────────────────────────
+
+  EFSFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-efs
+
+  EFSMountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      SubnetId: !ImportValue
+        Fn::Sub: ${ProjectName}-PublicSubnet1Id
+      SecurityGroups:
+        - !ImportValue
+          Fn::Sub: ${ProjectName}-SGEFSId
+
+  EFSMountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      SubnetId: !ImportValue
+        Fn::Sub: ${ProjectName}-PublicSubnet2Id
+      SecurityGroups:
+        - !ImportValue
+          Fn::Sub: ${ProjectName}-SGEFSId
+
+  # Access Points
+
+  EFSAPPostgres:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      PosixUser:
+        Uid: "999"
+        Gid: "999"
+      RootDirectory:
+        Path: /pgdata
+        CreationInfo:
+          OwnerUid: "999"
+          OwnerGid: "999"
+          Permissions: "755"
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-ap-postgres
+
+  EFSAPQdrant:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      PosixUser:
+        Uid: "1000"
+        Gid: "1000"
+      RootDirectory:
+        Path: /qdrant-storage
+        CreationInfo:
+          OwnerUid: "1000"
+          OwnerGid: "1000"
+          Permissions: "755"
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-ap-qdrant
+
+  EFSAPPrometheus:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      PosixUser:
+        Uid: "65534"
+        Gid: "65534"
+      RootDirectory:
+        Path: /prom-data
+        CreationInfo:
+          OwnerUid: "65534"
+          OwnerGid: "65534"
+          Permissions: "755"
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-ap-prometheus
+
+  EFSAPGrafana:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      PosixUser:
+        Uid: "472"
+        Gid: "472"
+      RootDirectory:
+        Path: /grafana-data
+        CreationInfo:
+          OwnerUid: "472"
+          OwnerGid: "472"
+          Permissions: "755"
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-ap-grafana
+
+  EFSAPReports:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      PosixUser:
+        Uid: "0"
+        Gid: "0"
+      RootDirectory:
+        Path: /reports
+        CreationInfo:
+          OwnerUid: "0"
+          OwnerGid: "0"
+          Permissions: "755"
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-ap-reports
+
+  # ── S3 Buckets ────────────────────────────────────────────────────────────
+
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub im-data-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: archive-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub im-artifacts-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+
+  CFNBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub im-cfn-${AWS::AccountId}
+
+  # ── Secrets Manager ───────────────────────────────────────────────────────
+  # Valores placeholder — preencher manualmente via aws-secrets-setup.sh
+
+  SecretDBPassword:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: im/db-password
+      Description: PostgreSQL password for all IM Platform databases
+      SecretString: '{"POSTGRES_PASSWORD":"CHANGE_ME"}'
+
+  SecretOpenAI:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: im/openai
+      Description: OpenAI API credentials
+      SecretString: '{"OPENAI_API_KEY":"CHANGE_ME"}'
+
+  SecretNoIP:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: im/noip
+      Description: No-IP DDNS credentials for platform-api
+      SecretString: '{"NOIP_USERNAME":"CHANGE_ME","NOIP_PASSWORD":"CHANGE_ME","NOIP_HOST":"CHANGE_ME"}'
+
+  SecretTailscale:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: im/tailscale
+      Description: Tailscale auth key for ECS private sidecars
+      SecretString: '{"TS_AUTHKEY":"CHANGE_ME"}'
+
+  SecretGrafana:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: im/grafana
+      Description: Grafana admin credentials
+      SecretString: '{"GF_SECURITY_ADMIN_PASSWORD":"CHANGE_ME"}'
+
+Outputs:
+
+  EFSFileSystemId:
+    Value: !Ref EFSFileSystem
+    Export:
+      Name: !Sub ${ProjectName}-EFSFileSystemId
+
+  EFSAPPostgresId:
+    Value: !GetAtt EFSAPPostgres.AccessPointId
+    Export:
+      Name: !Sub ${ProjectName}-EFSAPPostgresId
+
+  EFSAPQdrantId:
+    Value: !GetAtt EFSAPQdrant.AccessPointId
+    Export:
+      Name: !Sub ${ProjectName}-EFSAPQdrantId
+
+  EFSAPPrometheusId:
+    Value: !GetAtt EFSAPPrometheus.AccessPointId
+    Export:
+      Name: !Sub ${ProjectName}-EFSAPPrometheusId
+
+  EFSAPGrafanaId:
+    Value: !GetAtt EFSAPGrafana.AccessPointId
+    Export:
+      Name: !Sub ${ProjectName}-EFSAPGrafanaId
+
+  EFSAPReportsId:
+    Value: !GetAtt EFSAPReports.AccessPointId
+    Export:
+      Name: !Sub ${ProjectName}-EFSAPReportsId
+
+  DataBucketName:
+    Value: !Ref DataBucket
+    Export:
+      Name: !Sub ${ProjectName}-DataBucketName
+
+  ArtifactsBucketName:
+    Value: !Ref ArtifactsBucket
+    Export:
+      Name: !Sub ${ProjectName}-ArtifactsBucketName
+
+  SecretDBPasswordArn:
+    Value: !Ref SecretDBPassword
+    Export:
+      Name: !Sub ${ProjectName}-SecretDBPasswordArn
+
+  SecretOpenAIArn:
+    Value: !Ref SecretOpenAI
+    Export:
+      Name: !Sub ${ProjectName}-SecretOpenAIArn
+
+  SecretNoIPArn:
+    Value: !Ref SecretNoIP
+    Export:
+      Name: !Sub ${ProjectName}-SecretNoIPArn
+
+  SecretTailscaleArn:
+    Value: !Ref SecretTailscale
+    Export:
+      Name: !Sub ${ProjectName}-SecretTailscaleArn
+
+  SecretGrafanaArn:
+    Value: !Ref SecretGrafana
+    Export:
+      Name: !Sub ${ProjectName}-SecretGrafanaArn

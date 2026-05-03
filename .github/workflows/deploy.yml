@@ -1,0 +1,170 @@
+name: Deploy
+
+on:
+  push:
+    tags:
+      - "prod-*"
+
+permissions:
+  id-token: write   # necessário para OIDC
+  contents: read
+
+jobs:
+  deploy:
+    name: Build & Deploy to AWS ECS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── AWS auth via OIDC (sem credenciais permanentes) ──────────────────
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # ── ECR login ─────────────────────────────────────────────────────────
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ── Build & Push das 5 imagens customizadas ───────────────────────────
+
+      - name: Build & Push platform-api
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.api
+          push: true
+          tags: |
+            ${{ vars.ECR_API_REPO }}:${{ github.ref_name }}
+            ${{ vars.ECR_API_REPO }}:latest
+
+      - name: Build & Push prefect-worker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          tags: |
+            ${{ vars.ECR_WORKER_REPO }}:${{ github.ref_name }}
+            ${{ vars.ECR_WORKER_REPO }}:latest
+
+      - name: Build & Push mlflow
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.mlflow
+          push: true
+          tags: |
+            ${{ vars.ECR_MLFLOW_REPO }}:${{ github.ref_name }}
+            ${{ vars.ECR_MLFLOW_REPO }}:latest
+
+      - name: Build & Push prometheus
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.prometheus
+          push: true
+          tags: |
+            ${{ vars.ECR_PROMETHEUS_REPO }}:${{ github.ref_name }}
+            ${{ vars.ECR_PROMETHEUS_REPO }}:latest
+
+      - name: Build & Push grafana
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.grafana
+          push: true
+          tags: |
+            ${{ vars.ECR_GRAFANA_REPO }}:${{ github.ref_name }}
+            ${{ vars.ECR_GRAFANA_REPO }}:latest
+
+      # ── Atualiza task definitions com a nova tag ───────────────────────────
+
+      - name: Update ECS task definitions with new image tag
+        env:
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          REGION: ${{ vars.AWS_REGION }}
+          TAG: ${{ github.ref_name }}
+          ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          ECR_BASE="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
+
+          update_service() {
+            local SERVICE=$1
+            local FAMILY=$2
+            local CONTAINER=$3
+            local IMAGE=$4
+
+            TASK_DEF=$(aws ecs describe-task-definition \
+              --task-definition "$FAMILY" \
+              --query 'taskDefinition' \
+              --output json)
+
+            NEW_TASK_DEF=$(echo "$TASK_DEF" | python3 -c "
+          import json, sys
+          td = json.load(sys.stdin)
+          for c in td['containerDefinitions']:
+              if c['name'] == '$CONTAINER':
+                  c['image'] = '${IMAGE}:${TAG}'
+          for key in ['taskDefinitionArn','revision','status','requiresAttributes',
+                      'compatibilities','registeredAt','registeredBy']:
+              td.pop(key, None)
+          print(json.dumps(td))
+          ")
+
+            NEW_ARN=$(aws ecs register-task-definition \
+              --cli-input-json "$NEW_TASK_DEF" \
+              --query 'taskDefinition.taskDefinitionArn' \
+              --output text)
+
+            aws ecs update-service \
+              --cluster "$CLUSTER" \
+              --service "$SERVICE" \
+              --task-definition "$NEW_ARN" \
+              --force-new-deployment \
+              --output none
+
+            echo "✓ $SERVICE → $NEW_ARN"
+          }
+
+          update_service "platform-api"    "intelligent-maintenance-platform-api"    "platform-api"    "${ECR_BASE}/im/platform-api"
+          update_service "prefect-worker"  "intelligent-maintenance-prefect-worker"  "prefect-worker"  "${ECR_BASE}/im/prefect-worker"
+          update_service "mlflow"          "intelligent-maintenance-mlflow"          "mlflow"          "${ECR_BASE}/im/mlflow"
+          update_service "prometheus"      "intelligent-maintenance-prometheus"      "prometheus"      "${ECR_BASE}/im/prometheus"
+          update_service "grafana"         "intelligent-maintenance-grafana"         "grafana"         "${ECR_BASE}/im/grafana"
+
+      # ── Aguarda API e Worker estabilizarem ────────────────────────────────
+
+      - name: Wait for platform-api to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ vars.ECS_CLUSTER }} \
+            --services platform-api \
+            --region ${{ vars.AWS_REGION }}
+          echo "✓ platform-api estável"
+
+      - name: Wait for prefect-worker to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ vars.ECS_CLUSTER }} \
+            --services prefect-worker \
+            --region ${{ vars.AWS_REGION }}
+          echo "✓ prefect-worker estável"
+
+      - name: Deploy summary
+        run: |
+          echo "### Deploy concluído 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Serviço | Tag |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| platform-api | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| prefect-worker | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| mlflow | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| prometheus | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| grafana | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY

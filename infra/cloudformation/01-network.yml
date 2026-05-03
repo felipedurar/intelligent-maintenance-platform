@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  IM Platform — Network stack:
+  VPC, public subnets, Internet Gateway, Security Groups, Cloud Map namespace.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: intelligent-maintenance
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+
+Resources:
+
+  # ── VPC ────────────────────────────────────────────────────────────────────
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-igw
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ── Subnets ────────────────────────────────────────────────────────────────
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-public-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-public-2
+
+  # ── Route Table ────────────────────────────────────────────────────────────
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetRouteAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # ── Security Groups ────────────────────────────────────────────────────────
+
+  # SG-1: API — porta 8000 aberta para internet
+  SGPublic:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ProjectName}-sg-public
+      GroupDescription: ECS platform-api — inbound 8000 from internet
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-sg-public
+
+  # SG-2: Private — todo tráfego de SG-1 e self (serviços internos)
+  SGPrivate:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ProjectName}-sg-private
+      GroupDescription: ECS internal services — no inbound from internet
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-sg-private
+
+  # Regra: SG-Private recebe todo tráfego de SG-Public
+  SGPrivateIngressFromPublic:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SGPrivate
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref SGPublic
+
+  # Regra: SG-Private recebe todo tráfego de si mesmo (self-referencing)
+  SGPrivateIngressSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SGPrivate
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref SGPrivate
+
+  # SG-EFS: mount targets — porta NFS 2049
+  SGEFS:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ProjectName}-sg-efs
+      GroupDescription: EFS mount targets — NFS from ECS tasks
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref SGPrivate
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref SGPublic
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-sg-efs
+
+  # ── Cloud Map ──────────────────────────────────────────────────────────────
+
+  CloudMapNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Name: im.local
+      Vpc: !Ref VPC
+      Description: Private DNS namespace for IM Platform internal service discovery
+
+Outputs:
+
+  VpcId:
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${ProjectName}-VpcId
+
+  PublicSubnet1Id:
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: !Sub ${ProjectName}-PublicSubnet1Id
+
+  PublicSubnet2Id:
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: !Sub ${ProjectName}-PublicSubnet2Id
+
+  SGPublicId:
+    Value: !Ref SGPublic
+    Export:
+      Name: !Sub ${ProjectName}-SGPublicId
+
+  SGPrivateId:
+    Value: !Ref SGPrivate
+    Export:
+      Name: !Sub ${ProjectName}-SGPrivateId
+
+  SGEFSId:
+    Value: !Ref SGEFS
+    Export:
+      Name: !Sub ${ProjectName}-SGEFSId
+
+  CloudMapNamespaceId:
+    Value: !GetAtt CloudMapNamespace.Id
+    Export:
+      Name: !Sub ${ProjectName}-CloudMapNamespaceId

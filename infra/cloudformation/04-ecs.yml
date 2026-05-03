@@ -1,0 +1,1106 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  IM Platform — ECS stack:
+  Cluster, IAM roles, CloudWatch log groups, Cloud Map services,
+  task definitions and ECS services for all 8 containers.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: intelligent-maintenance
+  Environment:
+    Type: String
+    Default: prod
+  ImageTag:
+    Type: String
+    Default: latest
+    Description: Docker image tag to deploy (e.g. prod-1.0.0 or latest)
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+Mappings:
+  Config:
+    App:
+      OpenAIChatModel: gpt-4.1-mini
+      OpenAIEmbeddingModel: text-embedding-3-small
+      RAGCollectionName: datathon_docs
+      DriftReportDir: /app/reports/drift
+      LogLevel: INFO
+
+Resources:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # IAM
+  # ─────────────────────────────────────────────────────────────────────────
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-ecs-execution-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretDBPasswordArn
+                  - !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretOpenAIArn
+                  - !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretNoIPArn
+                  - !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretTailscaleArn
+                  - !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretGrafanaArn
+
+  PlatformAPITaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-api-task-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ReadData
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:ListBucket]
+                Resource:
+                  - !Sub arn:aws:s3:::im-data-${AWS::AccountId}
+                  - !Sub arn:aws:s3:::im-data-${AWS::AccountId}/*
+        - PolicyName: EFSReadReports
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:ClientMount
+                Resource: !Sub
+                  - arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:access-point/${APID}
+                  - APID: !ImportValue
+                      Fn::Sub: ${ProjectName}-EFSAPReportsId
+
+  PrivateServicesTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-private-task-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3FullData
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject, s3:ListBucket]
+                Resource:
+                  - !Sub arn:aws:s3:::im-data-${AWS::AccountId}
+                  - !Sub arn:aws:s3:::im-data-${AWS::AccountId}/*
+                  - !Sub arn:aws:s3:::im-artifacts-${AWS::AccountId}
+                  - !Sub arn:aws:s3:::im-artifacts-${AWS::AccountId}/*
+        - PolicyName: EFSAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                  - elasticfilesystem:ClientRootAccess
+                Resource: !Sub arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/*
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # CloudWatch Log Groups
+  # ─────────────────────────────────────────────────────────────────────────
+
+  LogGroupAPI:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/im/platform-api
+      RetentionInDays: 14
+
+  LogGroupPostgres:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/im/postgres
+      RetentionInDays: 14
+
+  LogGroupMLflow:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/im/mlflow
+      RetentionInDays: 14
+
+  LogGroupPrefectServer:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/im/prefect-server
+      RetentionInDays: 14
+
+  LogGroupPrefectWorker:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/im/prefect-worker
+      RetentionInDays: 14
+
+  LogGroupQdrant:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/im/qdrant
+      RetentionInDays: 14
+
+  LogGroupPrometheus:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/im/prometheus
+      RetentionInDays: 14
+
+  LogGroupGrafana:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/im/grafana
+      RetentionInDays: 14
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ECS Cluster
+  # ─────────────────────────────────────────────────────────────────────────
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${ProjectName}-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Cloud Map Service Discovery
+  # ─────────────────────────────────────────────────────────────────────────
+
+  SDPostgres:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: postgres
+      NamespaceId: !ImportValue
+        Fn::Sub: ${ProjectName}-CloudMapNamespaceId
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  SDMLflow:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: mlflow
+      NamespaceId: !ImportValue
+        Fn::Sub: ${ProjectName}-CloudMapNamespaceId
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  SDPrefectServer:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: prefect-server
+      NamespaceId: !ImportValue
+        Fn::Sub: ${ProjectName}-CloudMapNamespaceId
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  SDQdrant:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: qdrant
+      NamespaceId: !ImportValue
+        Fn::Sub: ${ProjectName}-CloudMapNamespaceId
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  SDPlatformAPI:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: platform-api
+      NamespaceId: !ImportValue
+        Fn::Sub: ${ProjectName}-CloudMapNamespaceId
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Task Definitions
+  # ─────────────────────────────────────────────────────────────────────────
+
+  # ── platform-api ──────────────────────────────────────────────────────────
+
+  TaskDefAPI:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-platform-api
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PlatformAPITaskRole.Arn
+      Volumes:
+        - Name: efs-reports
+          EFSVolumeConfiguration:
+            FilesystemId: !ImportValue
+              Fn::Sub: ${ProjectName}-EFSFileSystemId
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !ImportValue
+                Fn::Sub: ${ProjectName}-EFSAPReportsId
+              IAM: ENABLED
+      ContainerDefinitions:
+        - Name: platform-api
+          Image: !Sub
+            - ${URI}:${Tag}
+            - URI: !ImportValue
+                Fn::Sub: ${ProjectName}-ECRPlatformAPIUri
+              Tag: !Ref ImageTag
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8000
+              Protocol: tcp
+          MountPoints:
+            - SourceVolume: efs-reports
+              ContainerPath: /app/reports
+              ReadOnly: true
+          Environment:
+            - Name: APP_ENV
+              Value: !Ref Environment
+            - Name: LOG_LEVEL
+              Value: !FindInMap [Config, App, LogLevel]
+            - Name: PYTHONPATH
+              Value: /app/src
+            - Name: OPENAI_CHAT_MODEL
+              Value: !FindInMap [Config, App, OpenAIChatModel]
+            - Name: OPENAI_EMBEDDING_MODEL
+              Value: !FindInMap [Config, App, OpenAIEmbeddingModel]
+            - Name: RAG_COLLECTION_NAME
+              Value: !FindInMap [Config, App, RAGCollectionName]
+            - Name: DRIFT_REPORT_DIR
+              Value: !FindInMap [Config, App, DriftReportDir]
+            - Name: MLFLOW_TRACKING_URI
+              Value: http://mlflow.im.local:5000
+            - Name: QDRANT_URL
+              Value: http://qdrant.im.local:6333
+            - Name: PREFECT_API_URL
+              Value: http://prefect-server.im.local:4200/api
+          Secrets:
+            - Name: OPENAI_API_KEY
+              ValueFrom: !Sub
+                - "${ARN}:OPENAI_API_KEY::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretOpenAIArn
+            - Name: NOIP_USERNAME
+              ValueFrom: !Sub
+                - "${ARN}:NOIP_USERNAME::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretNoIPArn
+            - Name: NOIP_PASSWORD
+              ValueFrom: !Sub
+                - "${ARN}:NOIP_PASSWORD::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretNoIPArn
+            - Name: NOIP_HOST
+              ValueFrom: !Sub
+                - "${ARN}:NOIP_HOST::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretNoIPArn
+            - Name: DATABASE_URL
+              ValueFrom: !Sub
+                - "${ARN}:DATABASE_URL::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretDBPasswordArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/platform-api
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+
+  # ── postgres ──────────────────────────────────────────────────────────────
+
+  TaskDefPostgres:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-postgres
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PrivateServicesTaskRole.Arn
+      Volumes:
+        - Name: efs-pgdata
+          EFSVolumeConfiguration:
+            FilesystemId: !ImportValue
+              Fn::Sub: ${ProjectName}-EFSFileSystemId
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !ImportValue
+                Fn::Sub: ${ProjectName}-EFSAPPostgresId
+              IAM: ENABLED
+      ContainerDefinitions:
+        - Name: postgres
+          Image: postgres:16-alpine
+          Essential: true
+          PortMappings:
+            - ContainerPort: 5432
+              Protocol: tcp
+          MountPoints:
+            - SourceVolume: efs-pgdata
+              ContainerPath: /var/lib/postgresql/data
+              ReadOnly: false
+          Environment:
+            - Name: POSTGRES_DB
+              Value: datathon
+            - Name: POSTGRES_USER
+              Value: datathon
+          Secrets:
+            - Name: POSTGRES_PASSWORD
+              ValueFrom: !Sub
+                - "${ARN}:POSTGRES_PASSWORD::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretDBPasswordArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/postgres
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: postgres
+        - Name: tailscale
+          Image: tailscale/tailscale:latest
+          Essential: false
+          Environment:
+            - Name: TS_USERSPACE
+              Value: "true"
+            - Name: TS_HOSTNAME
+              Value: im-postgres
+            - Name: TS_EXTRA_ARGS
+              Value: --advertise-tags=tag:ecs-private
+          Secrets:
+            - Name: TS_AUTHKEY
+              ValueFrom: !Sub
+                - "${ARN}:TS_AUTHKEY::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretTailscaleArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/postgres
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: tailscale
+
+  # ── mlflow ────────────────────────────────────────────────────────────────
+
+  TaskDefMLflow:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-mlflow
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "256"
+      Memory: "512"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PrivateServicesTaskRole.Arn
+      ContainerDefinitions:
+        - Name: mlflow
+          Image: !Sub
+            - ${URI}:${Tag}
+            - URI: !ImportValue
+                Fn::Sub: ${ProjectName}-ECRMLflowUri
+              Tag: !Ref ImageTag
+          Essential: true
+          PortMappings:
+            - ContainerPort: 5000
+              Protocol: tcp
+          Environment:
+            - Name: MLFLOW_ARTIFACTS_DESTINATION
+              Value: !Sub s3://im-artifacts-${AWS::AccountId}/mlflow
+          Secrets:
+            - Name: DATABASE_URL
+              ValueFrom: !Sub
+                - "${ARN}:DATABASE_URL::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretDBPasswordArn
+          Command:
+            - mlflow
+            - server
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "5000"
+            - --backend-store-uri
+            - !Sub
+              - "postgresql+psycopg2://datathon:$(POSTGRES_PASSWORD)@postgres.im.local:5432/mlflow"
+              - {}
+            - --serve-artifacts
+            - --artifacts-destination
+            - !Sub s3://im-artifacts-${AWS::AccountId}/mlflow
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/mlflow
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: mlflow
+        - Name: tailscale
+          Image: tailscale/tailscale:latest
+          Essential: false
+          Environment:
+            - Name: TS_USERSPACE
+              Value: "true"
+            - Name: TS_HOSTNAME
+              Value: im-mlflow
+            - Name: TS_EXTRA_ARGS
+              Value: --advertise-tags=tag:ecs-private
+          Secrets:
+            - Name: TS_AUTHKEY
+              ValueFrom: !Sub
+                - "${ARN}:TS_AUTHKEY::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretTailscaleArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/mlflow
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: tailscale
+
+  # ── prefect-server ────────────────────────────────────────────────────────
+
+  TaskDefPrefectServer:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-prefect-server
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PrivateServicesTaskRole.Arn
+      ContainerDefinitions:
+        - Name: prefect-server
+          Image: prefecthq/prefect:3-python3.12
+          Essential: true
+          PortMappings:
+            - ContainerPort: 4200
+              Protocol: tcp
+          Environment:
+            - Name: PREFECT_UI_URL
+              Value: http://im-prefect.your-tailnet.ts.net:4200
+            - Name: PREFECT_API_URL
+              Value: http://0.0.0.0:4200/api
+          Secrets:
+            - Name: PREFECT_API_DATABASE_CONNECTION_URL
+              ValueFrom: !Sub
+                - "${ARN}:PREFECT_API_DATABASE_CONNECTION_URL::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretDBPasswordArn
+          Command:
+            - prefect
+            - server
+            - start
+            - --host
+            - "0.0.0.0"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/prefect-server
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: prefect-server
+        - Name: tailscale
+          Image: tailscale/tailscale:latest
+          Essential: false
+          Environment:
+            - Name: TS_USERSPACE
+              Value: "true"
+            - Name: TS_HOSTNAME
+              Value: im-prefect
+            - Name: TS_EXTRA_ARGS
+              Value: --advertise-tags=tag:ecs-private
+          Secrets:
+            - Name: TS_AUTHKEY
+              ValueFrom: !Sub
+                - "${ARN}:TS_AUTHKEY::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretTailscaleArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/prefect-server
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: tailscale
+
+  # ── prefect-worker ────────────────────────────────────────────────────────
+
+  TaskDefPrefectWorker:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-prefect-worker
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "1024"
+      Memory: "2048"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PrivateServicesTaskRole.Arn
+      Volumes:
+        - Name: efs-reports
+          EFSVolumeConfiguration:
+            FilesystemId: !ImportValue
+              Fn::Sub: ${ProjectName}-EFSFileSystemId
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !ImportValue
+                Fn::Sub: ${ProjectName}-EFSAPReportsId
+              IAM: ENABLED
+      ContainerDefinitions:
+        - Name: prefect-worker
+          Image: !Sub
+            - ${URI}:${Tag}
+            - URI: !ImportValue
+                Fn::Sub: ${ProjectName}-ECRPrefectWorkerUri
+              Tag: !Ref ImageTag
+          Essential: true
+          MountPoints:
+            - SourceVolume: efs-reports
+              ContainerPath: /app/reports
+              ReadOnly: false
+          Environment:
+            - Name: PYTHONPATH
+              Value: /app/src
+            - Name: PREFECT_API_URL
+              Value: http://prefect-server.im.local:4200/api
+            - Name: MLFLOW_TRACKING_URI
+              Value: http://mlflow.im.local:5000
+            - Name: QDRANT_URL
+              Value: http://qdrant.im.local:6333
+            - Name: OPENAI_CHAT_MODEL
+              Value: !FindInMap [Config, App, OpenAIChatModel]
+            - Name: OPENAI_EMBEDDING_MODEL
+              Value: !FindInMap [Config, App, OpenAIEmbeddingModel]
+            - Name: RAG_COLLECTION_NAME
+              Value: !FindInMap [Config, App, RAGCollectionName]
+            - Name: DRIFT_REPORT_DIR
+              Value: !FindInMap [Config, App, DriftReportDir]
+            - Name: DATA_BUCKET
+              Value: !Sub im-data-${AWS::AccountId}
+          Secrets:
+            - Name: DATABASE_URL
+              ValueFrom: !Sub
+                - "${ARN}:DATABASE_URL::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretDBPasswordArn
+            - Name: OPENAI_API_KEY
+              ValueFrom: !Sub
+                - "${ARN}:OPENAI_API_KEY::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretOpenAIArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/prefect-worker
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: worker
+
+  # ── qdrant ────────────────────────────────────────────────────────────────
+
+  TaskDefQdrant:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-qdrant
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PrivateServicesTaskRole.Arn
+      Volumes:
+        - Name: efs-qdrant
+          EFSVolumeConfiguration:
+            FilesystemId: !ImportValue
+              Fn::Sub: ${ProjectName}-EFSFileSystemId
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !ImportValue
+                Fn::Sub: ${ProjectName}-EFSAPQdrantId
+              IAM: ENABLED
+      ContainerDefinitions:
+        - Name: qdrant
+          Image: qdrant/qdrant:v1.12.6
+          Essential: true
+          PortMappings:
+            - ContainerPort: 6333
+              Protocol: tcp
+          MountPoints:
+            - SourceVolume: efs-qdrant
+              ContainerPath: /qdrant/storage
+              ReadOnly: false
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/qdrant
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: qdrant
+        - Name: tailscale
+          Image: tailscale/tailscale:latest
+          Essential: false
+          Environment:
+            - Name: TS_USERSPACE
+              Value: "true"
+            - Name: TS_HOSTNAME
+              Value: im-qdrant
+            - Name: TS_EXTRA_ARGS
+              Value: --advertise-tags=tag:ecs-private
+          Secrets:
+            - Name: TS_AUTHKEY
+              ValueFrom: !Sub
+                - "${ARN}:TS_AUTHKEY::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretTailscaleArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/qdrant
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: tailscale
+
+  # ── prometheus ────────────────────────────────────────────────────────────
+
+  TaskDefPrometheus:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-prometheus
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "256"
+      Memory: "512"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PrivateServicesTaskRole.Arn
+      Volumes:
+        - Name: efs-prom
+          EFSVolumeConfiguration:
+            FilesystemId: !ImportValue
+              Fn::Sub: ${ProjectName}-EFSFileSystemId
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !ImportValue
+                Fn::Sub: ${ProjectName}-EFSAPPrometheusId
+              IAM: ENABLED
+      ContainerDefinitions:
+        - Name: prometheus
+          Image: !Sub
+            - ${URI}:${Tag}
+            - URI: !ImportValue
+                Fn::Sub: ${ProjectName}-ECRPrometheusUri
+              Tag: !Ref ImageTag
+          Essential: true
+          PortMappings:
+            - ContainerPort: 9090
+              Protocol: tcp
+          MountPoints:
+            - SourceVolume: efs-prom
+              ContainerPath: /prometheus
+              ReadOnly: false
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/prometheus
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: prometheus
+        - Name: tailscale
+          Image: tailscale/tailscale:latest
+          Essential: false
+          Environment:
+            - Name: TS_USERSPACE
+              Value: "true"
+            - Name: TS_HOSTNAME
+              Value: im-prometheus
+            - Name: TS_EXTRA_ARGS
+              Value: --advertise-tags=tag:ecs-private
+          Secrets:
+            - Name: TS_AUTHKEY
+              ValueFrom: !Sub
+                - "${ARN}:TS_AUTHKEY::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretTailscaleArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/prometheus
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: tailscale
+
+  # ── grafana ───────────────────────────────────────────────────────────────
+
+  TaskDefGrafana:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-grafana
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "256"
+      Memory: "512"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PrivateServicesTaskRole.Arn
+      Volumes:
+        - Name: efs-grafana
+          EFSVolumeConfiguration:
+            FilesystemId: !ImportValue
+              Fn::Sub: ${ProjectName}-EFSFileSystemId
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !ImportValue
+                Fn::Sub: ${ProjectName}-EFSAPGrafanaId
+              IAM: ENABLED
+      ContainerDefinitions:
+        - Name: grafana
+          Image: !Sub
+            - ${URI}:${Tag}
+            - URI: !ImportValue
+                Fn::Sub: ${ProjectName}-ECRGrafanaUri
+              Tag: !Ref ImageTag
+          Essential: true
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+          MountPoints:
+            - SourceVolume: efs-grafana
+              ContainerPath: /var/lib/grafana
+              ReadOnly: false
+          Environment:
+            - Name: GF_SECURITY_ADMIN_USER
+              Value: admin
+            - Name: GF_SERVER_ROOT_URL
+              Value: http://im-grafana.your-tailnet.ts.net:3000
+          Secrets:
+            - Name: GF_SECURITY_ADMIN_PASSWORD
+              ValueFrom: !Sub
+                - "${ARN}:GF_SECURITY_ADMIN_PASSWORD::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretGrafanaArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/grafana
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: grafana
+        - Name: tailscale
+          Image: tailscale/tailscale:latest
+          Essential: false
+          Environment:
+            - Name: TS_USERSPACE
+              Value: "true"
+            - Name: TS_HOSTNAME
+              Value: im-grafana
+            - Name: TS_EXTRA_ARGS
+              Value: --advertise-tags=tag:ecs-private
+          Secrets:
+            - Name: TS_AUTHKEY
+              ValueFrom: !Sub
+                - "${ARN}:TS_AUTHKEY::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretTailscaleArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/grafana
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: tailscale
+
+  # ── postgres-init (one-time RunTask) ─────────────────────────────────────
+
+  TaskDefPostgresInit:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-postgres-init
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "256"
+      Memory: "512"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PrivateServicesTaskRole.Arn
+      ContainerDefinitions:
+        - Name: postgres-init
+          Image: postgres:16-alpine
+          Essential: true
+          Environment:
+            - Name: PGHOST
+              Value: postgres.im.local
+            - Name: PGUSER
+              Value: datathon
+          Secrets:
+            - Name: PGPASSWORD
+              ValueFrom: !Sub
+                - "${ARN}:POSTGRES_PASSWORD::"
+                - ARN: !ImportValue
+                    Fn::Sub: ${ProjectName}-SecretDBPasswordArn
+          Command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres.im.local -U datathon; do sleep 3; done
+              psql -h postgres.im.local -U datathon -c "CREATE DATABASE prefect;" || true
+              psql -h postgres.im.local -U datathon -c "CREATE DATABASE mlflow;"  || true
+              echo "Databases created."
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/postgres
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: init
+
+  # ── prefect-deployments (one-time RunTask) ────────────────────────────────
+
+  TaskDefPrefectDeployments:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-prefect-deployments
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "256"
+      Memory: "512"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PrivateServicesTaskRole.Arn
+      ContainerDefinitions:
+        - Name: prefect-deployments
+          Image: !Sub
+            - ${URI}:${Tag}
+            - URI: !ImportValue
+                Fn::Sub: ${ProjectName}-ECRPrefectWorkerUri
+              Tag: !Ref ImageTag
+          Essential: true
+          Environment:
+            - Name: PREFECT_API_URL
+              Value: http://prefect-server.im.local:4200/api
+            - Name: PYTHONPATH
+              Value: /app/src
+          Command:
+            - bash
+            - scripts/register_prefect_deployments.sh
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/prefect-worker
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: deployments
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ECS Services
+  # ─────────────────────────────────────────────────────────────────────────
+
+  ServiceAPI:
+    Type: AWS::ECS::Service
+    DependsOn: [LogGroupAPI]
+    Properties:
+      ServiceName: platform-api
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefAPI
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-PublicSubnet1Id
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-SGPublicId
+      ServiceRegistries:
+        - RegistryArn: !GetAtt SDPlatformAPI.Arn
+
+  ServicePostgres:
+    Type: AWS::ECS::Service
+    DependsOn: [LogGroupPostgres]
+    Properties:
+      ServiceName: postgres
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefPostgres
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-PublicSubnet1Id
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-SGPrivateId
+      ServiceRegistries:
+        - RegistryArn: !GetAtt SDPostgres.Arn
+
+  ServiceMLflow:
+    Type: AWS::ECS::Service
+    DependsOn: [LogGroupMLflow]
+    Properties:
+      ServiceName: mlflow
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefMLflow
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-PublicSubnet1Id
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-SGPrivateId
+      ServiceRegistries:
+        - RegistryArn: !GetAtt SDMLflow.Arn
+
+  ServicePrefectServer:
+    Type: AWS::ECS::Service
+    DependsOn: [LogGroupPrefectServer]
+    Properties:
+      ServiceName: prefect-server
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefPrefectServer
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-PublicSubnet1Id
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-SGPrivateId
+      ServiceRegistries:
+        - RegistryArn: !GetAtt SDPrefectServer.Arn
+
+  ServicePrefectWorker:
+    Type: AWS::ECS::Service
+    DependsOn: [LogGroupPrefectWorker]
+    Properties:
+      ServiceName: prefect-worker
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefPrefectWorker
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-PublicSubnet1Id
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-SGPrivateId
+
+  ServiceQdrant:
+    Type: AWS::ECS::Service
+    DependsOn: [LogGroupQdrant]
+    Properties:
+      ServiceName: qdrant
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefQdrant
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-PublicSubnet1Id
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-SGPrivateId
+      ServiceRegistries:
+        - RegistryArn: !GetAtt SDQdrant.Arn
+
+  ServicePrometheus:
+    Type: AWS::ECS::Service
+    DependsOn: [LogGroupPrometheus]
+    Properties:
+      ServiceName: prometheus
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefPrometheus
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-PublicSubnet1Id
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-SGPrivateId
+
+  ServiceGrafana:
+    Type: AWS::ECS::Service
+    DependsOn: [LogGroupGrafana]
+    Properties:
+      ServiceName: grafana
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefGrafana
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-PublicSubnet1Id
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub: ${ProjectName}-SGPrivateId
+
+Outputs:
+
+  ClusterName:
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${ProjectName}-ClusterName
+
+  ClusterArn:
+    Value: !GetAtt ECSCluster.Arn
+    Export:
+      Name: !Sub ${ProjectName}-ClusterArn

@@ -92,6 +92,10 @@ jobs:
             dockerfile: Dockerfile.worker
           - name: mlflow
             dockerfile: Dockerfile.mlflow
+          - name: prometheus
+            dockerfile: Dockerfile.prometheus
+          - name: grafana
+            dockerfile: Dockerfile.grafana
 
     steps:
       - name: Checkout
