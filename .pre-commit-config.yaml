@@ -1,0 +1,62 @@
+default_language_version:
+  python: python3.12
+
+exclude: |
+  (?x)^(
+    data/raw/.*|
+    data/incoming/.*|
+    data/processed/.*|
+    data/reference/.*|
+    data/archive/.*|
+    evaluation/reports/.*|
+    reports/drift/.*|
+    \.dvc/tmp/.*
+  )$
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-ast
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+        args: ["--unsafe"]
+      - id: debug-statements
+      - id: detect-private-key
+      - id: end-of-file-fixer
+        exclude: ^notebooks/.*\.ipynb$
+      - id: trailing-whitespace
+        exclude: ^notebooks/.*\.ipynb$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy-src
+        name: mypy src
+        entry: mypy src
+        language: system
+        pass_filenames: false
+        types_or: [python, pyi]
+      - id: bandit-src
+        name: bandit src
+        entry: bandit -r src -c pyproject.toml
+        language: system
+        pass_filenames: false
+        types: [python]
+      - id: pytest-fast
+        name: pytest fast suite
+        entry: pytest tests
+        language: system
+        pass_filenames: false
+        types: [python]
+        stages: [pre-push]
