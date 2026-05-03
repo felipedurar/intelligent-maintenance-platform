@@ -123,6 +123,14 @@ Training should log:
 - feature importance or explanation artifact when available.
 - Evidently drift reference artifact.
 
+Current implementation:
+
+- baseline: class-balanced logistic regression with standard scaling.
+- challenger: class-balanced random forest.
+- selection metric: average precision first, then recall and F1 as tie-breakers.
+- registry name: `ai4i-machine-failure-classifier`.
+- serving alias: `champion`.
+
 Required tags:
 
 - `model_name`

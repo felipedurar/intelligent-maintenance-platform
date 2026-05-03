@@ -1,1 +1,1 @@
-"""Training workflows package."""
+"""Training package for the predictive-maintenance models."""

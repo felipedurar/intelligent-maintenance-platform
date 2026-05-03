@@ -35,8 +35,7 @@ class PredictionResponse(BaseModel):
     summary="Predict machine failure risk",
     description=(
         "Scores one machine/process observation and returns failure probability, risk class, "
-        "model version, and metadata. The current implementation returns a placeholder until "
-        "the MLflow-backed model serving layer is connected."
+        "model version, and metadata from the registered MLflow champion model."
     ),
 )
 def predict_failure(

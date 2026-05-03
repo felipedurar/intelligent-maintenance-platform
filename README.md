@@ -64,7 +64,7 @@ The routes should be wired to placeholder modules first, then connected to OpenA
 
 ## Run With Docker Compose
 
-Start the platform API, PostgreSQL, Prefect server, and Prefect worker:
+Start the platform API, PostgreSQL, MLflow, Prefect server, and Prefect worker:
 
 ```bash
 docker compose up --build
@@ -74,6 +74,7 @@ The API and worker are separate runtime images:
 
 - `Dockerfile.api`: online FastAPI service for chat, predictions, RAG search, and metadata.
 - `Dockerfile.worker`: offline Prefect worker for ingestion, feature builds, training, drift, and RAG indexing.
+- `Dockerfile.mlflow`: MLflow tracking server and model registry runtime.
 
 Open the FastAPI docs:
 
@@ -93,7 +94,19 @@ The same PostgreSQL service also stores Prefect server metadata in a separate `p
 postgresql+asyncpg://datathon:datathon@postgres:5432/prefect
 ```
 
-The `postgres-init` service creates this database automatically if it is missing, including when a previous Docker volume already exists.
+The same PostgreSQL service also stores MLflow metadata in a separate `mlflow` database:
+
+```text
+postgresql+psycopg2://datathon:datathon@postgres:5432/mlflow
+```
+
+The `postgres-init` service creates these databases automatically if they are missing, including when a previous Docker volume already exists.
+
+MLflow UI:
+
+```text
+http://localhost:5000
+```
 
 Prefect UI:
 
@@ -108,6 +121,7 @@ After startup, the Prefect UI should show these deployments:
 
 - `ingest-initial-ai4i-dataset/initial-ai4i-dataset`
 - `ingest-incoming-ai4i-batches/incoming-ai4i-batches`
+- `train-ai4i-failure-classifier/train-ai4i-failure-classifier`
 
 If you need to register them manually, run:
 
@@ -129,6 +143,12 @@ Trigger the registered incoming-batch ingestion deployment:
 docker compose exec prefect-worker ./scripts/run_incoming_ingestion_deployment.sh
 ```
 
+Trigger the registered training deployment:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_training_deployment.sh
+```
+
 Run the initial AI4I CSV ingestion directly:
 
 ```bash
@@ -139,6 +159,12 @@ Run future incoming-batch ingestion directly after placing CSV files in `data/in
 
 ```bash
 docker compose exec prefect-worker ./scripts/run_incoming_ingestion.sh
+```
+
+Run the training pipeline directly after ingestion:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_training.sh
 ```
 
 The initial flow reads:
@@ -158,6 +184,15 @@ and moves processed incoming files to:
 ```text
 data/archive/
 ```
+
+Both ingestion flows also export engineered snapshots to:
+
+```text
+data/processed/ai4i_features_<batch_id>.csv
+data/processed/ai4i_features_latest.csv
+```
+
+The training pipeline reads `ai4i_machine_features` from PostgreSQL, trains a baseline logistic-regression model and a challenger random-forest model, logs metrics/artifacts to MLflow, registers the best model as `ai4i-machine-failure-classifier`, and assigns the `champion` alias. The prediction endpoint loads that MLflow champion model.
 
 ## Documentation
 

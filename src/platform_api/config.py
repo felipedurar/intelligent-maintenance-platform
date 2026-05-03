@@ -18,6 +18,10 @@ class Settings(BaseSettings):
         validation_alias="DATABASE_URL",
     )
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    mlflow_tracking_uri: str = Field(
+        default="http://localhost:5000",
+        validation_alias="MLFLOW_TRACKING_URI",
+    )
 
 
 @lru_cache

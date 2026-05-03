@@ -70,7 +70,7 @@ pandera
 Recommended first model path:
 
 ```text
-Logistic Regression baseline
-Random Forest or Gradient Boosting challenger
+Logistic Regression baseline: implemented
+Random Forest challenger: implemented
 Optional PyTorch MLP
 ```

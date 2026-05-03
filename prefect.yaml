@@ -16,6 +16,7 @@ deployments:
       work_queue_name: default
     parameters:
       csv_path: data/raw/ai4i2020.csv
+      processed_dir: data/processed
     tags:
       - ingestion
       - ai4i
@@ -29,7 +30,18 @@ deployments:
     parameters:
       incoming_dir: data/incoming
       archive_dir: data/archive
+      processed_dir: data/processed
     tags:
       - ingestion
       - ai4i
       - incoming
+
+  - name: train-ai4i-failure-classifier
+    entrypoint: src/training/train_model.py:train_ai4i_failure_classifier
+    work_pool:
+      name: datathon-local
+      work_queue_name: default
+    tags:
+      - training
+      - ai4i
+      - mlflow
