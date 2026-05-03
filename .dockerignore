@@ -11,5 +11,9 @@ data/processed
 data/reference
 data/archive
 !data/raw/ai4i2020.csv
+evaluation/reports/*
+!evaluation/reports/.gitkeep
+reports/drift/*
+!reports/drift/.gitkeep
 *.db
 *.sqlite

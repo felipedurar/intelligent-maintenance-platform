@@ -30,3 +30,30 @@ Override the API URL when needed:
 ```bash
 API_BASE_URL=http://localhost:8080 ./evaluation/run_prediction_smoke.sh
 ```
+
+## Agent Golden-Set Evaluation
+
+`data/golden_set/agent_eval.jsonl` contains question, expected answer, expected tool, and
+expected context cases for the RAG/agent layer.
+
+Run deterministic checks only:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_agent_evaluation.sh
+```
+
+Run OpenAI LLM-as-judge and log the report to MLflow:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_agent_evaluation.sh --judge --mlflow
+```
+
+Run optional RAGAS metrics after installing evaluation extras:
+
+```bash
+pip install -e ".[eval]"
+python -m evaluation.agent_eval --judge --ragas --mlflow
+```
+
+Reports are written to `evaluation/reports/agent_eval_latest.json` and
+`evaluation/reports/agent_eval_latest.md`.

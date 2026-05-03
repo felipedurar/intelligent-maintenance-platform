@@ -10,6 +10,7 @@ data/processed/*
 data/reference/*
 data/archive/*
 reports/drift/*
+evaluation/reports/*
 !data/raw/.gitkeep
 !data/raw/*.dvc
 !data/incoming/.gitkeep
@@ -20,5 +21,6 @@ reports/drift/*
 !data/archive/.gitkeep
 !reports/.gitkeep
 !reports/drift/.gitkeep
+!evaluation/reports/.gitkeep
 *.db
 *.sqlite

@@ -75,6 +75,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./src:/app/src:ro
+      - ./evaluation:/app/evaluation
       - ./data:/app/data
       - ./reports:/app/reports
     command: >

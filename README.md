@@ -213,6 +213,25 @@ Run RAG indexing directly after setting `OPENAI_API_KEY`:
 docker compose exec prefect-worker ./scripts/run_rag_indexing.sh
 ```
 
+Run the golden-set agent evaluation with deterministic checks:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_agent_evaluation.sh
+```
+
+Enable OpenAI LLM-as-judge when `OPENAI_API_KEY` is configured:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_agent_evaluation.sh --judge --mlflow
+```
+
+Enable RAGAS after installing optional evaluation dependencies:
+
+```bash
+pip install -e ".[eval]"
+python -m evaluation.agent_eval --judge --ragas --mlflow
+```
+
 Run PSI drift detection directly after a processed dataset exists:
 
 ```bash
@@ -232,6 +251,19 @@ The agent evaluation golden set lives at:
 
 ```text
 data/golden_set/agent_eval.jsonl
+```
+
+It evaluates the chat agent with:
+
+- deterministic checks for expected tool usage, retrieved source recall, and non-empty answers;
+- optional OpenAI LLM-as-judge scoring for answer quality, groundedness, safety, and tool/context use;
+- optional RAGAS metrics for faithfulness, answer relevancy, context precision, and context recall.
+
+Reports are written to:
+
+```text
+evaluation/reports/agent_eval_latest.json
+evaluation/reports/agent_eval_latest.md
 ```
 
 Run the automated tests locally after installing dev dependencies:
