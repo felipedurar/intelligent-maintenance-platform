@@ -71,6 +71,22 @@ Start the platform API, PostgreSQL, MLflow, Prefect server, and Prefect worker:
 docker compose up --build
 ```
 
+Common development shortcuts are available through `make`:
+
+```bash
+make help
+make install-dev
+make pre-commit-install
+make quality
+make up
+make train
+make agent-eval
+make security-eval
+```
+
+The repository also includes `.pre-commit-config.yaml` with file hygiene checks, Ruff
+format/lint, mypy, Bandit, and a pre-push pytest hook.
+
 The API and worker are separate runtime images:
 
 - `Dockerfile.api`: online FastAPI service for chat, predictions, RAG search, and metadata.
