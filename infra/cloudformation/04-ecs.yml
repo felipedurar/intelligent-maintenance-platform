@@ -13,10 +13,19 @@ Parameters:
     Default: prod
   ImageTag:
     Type: String
-    Default: latest
-    Description: Docker image tag to deploy (e.g. prod-1.0.0 or latest)
+    Default: placeholder
+    Description: >
+      Docker image tag to deploy (e.g. prod-1.0.0 or latest).
+      Use "placeholder" on first deploy when ECR repos are still empty —
+      the services start with a nginx placeholder image until the first
+      prod-* tag push replaces them via GitHub Actions.
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+Conditions:
+  # Quando ImageTag=placeholder, usa nginx público para permitir criação dos
+  # serviços ECS antes das imagens ECR existirem (primeiro deploy).
+  IsPlaceholder: !Equals [!Ref ImageTag, placeholder]
 
 Mappings:
   Config:
@@ -294,11 +303,14 @@ Resources:
               IAM: ENABLED
       ContainerDefinitions:
         - Name: platform-api
-          Image: !Sub
-            - ${URI}:${Tag}
-            - URI: !ImportValue
-                Fn::Sub: ${ProjectName}-ECRPlatformAPIUri
-              Tag: !Ref ImageTag
+          Image: !If
+            - IsPlaceholder
+            - public.ecr.aws/docker/library/nginx:alpine
+            - !Sub
+              - ${URI}:${Tag}
+              - URI: !ImportValue
+                  Fn::Sub: ${ProjectName}-ECRPlatformAPIUri
+                Tag: !Ref ImageTag
           Essential: true
           PortMappings:
             - ContainerPort: 8000
@@ -448,11 +460,14 @@ Resources:
       TaskRoleArn: !GetAtt PrivateServicesTaskRole.Arn
       ContainerDefinitions:
         - Name: mlflow
-          Image: !Sub
-            - ${URI}:${Tag}
-            - URI: !ImportValue
-                Fn::Sub: ${ProjectName}-ECRMLflowUri
-              Tag: !Ref ImageTag
+          Image: !If
+            - IsPlaceholder
+            - public.ecr.aws/docker/library/nginx:alpine
+            - !Sub
+              - ${URI}:${Tag}
+              - URI: !ImportValue
+                  Fn::Sub: ${ProjectName}-ECRMLflowUri
+                Tag: !Ref ImageTag
           Essential: true
           PortMappings:
             - ContainerPort: 5000
@@ -598,10 +613,13 @@ Resources:
               IAM: ENABLED
       ContainerDefinitions:
         - Name: prefect-worker
-          Image: !Sub
-            - ${URI}:${Tag}
-            - URI: !ImportValue
-                Fn::Sub: ${ProjectName}-ECRPrefectWorkerUri
+          Image: !If
+            - IsPlaceholder
+            - public.ecr.aws/docker/library/nginx:alpine
+            - !Sub
+              - ${URI}:${Tag}
+              - URI: !ImportValue
+                  Fn::Sub: ${ProjectName}-ECRPrefectWorkerUri
               Tag: !Ref ImageTag
           Essential: true
           MountPoints:
@@ -731,10 +749,13 @@ Resources:
               IAM: ENABLED
       ContainerDefinitions:
         - Name: prometheus
-          Image: !Sub
-            - ${URI}:${Tag}
-            - URI: !ImportValue
-                Fn::Sub: ${ProjectName}-ECRPrometheusUri
+          Image: !If
+            - IsPlaceholder
+            - public.ecr.aws/docker/library/nginx:alpine
+            - !Sub
+              - ${URI}:${Tag}
+              - URI: !ImportValue
+                  Fn::Sub: ${ProjectName}-ECRPrometheusUri
               Tag: !Ref ImageTag
           Essential: true
           PortMappings:
@@ -797,10 +818,13 @@ Resources:
               IAM: ENABLED
       ContainerDefinitions:
         - Name: grafana
-          Image: !Sub
-            - ${URI}:${Tag}
-            - URI: !ImportValue
-                Fn::Sub: ${ProjectName}-ECRGrafanaUri
+          Image: !If
+            - IsPlaceholder
+            - public.ecr.aws/docker/library/nginx:alpine
+            - !Sub
+              - ${URI}:${Tag}
+              - URI: !ImportValue
+                  Fn::Sub: ${ProjectName}-ECRGrafanaUri
               Tag: !Ref ImageTag
           Essential: true
           PortMappings:
@@ -906,10 +930,13 @@ Resources:
       TaskRoleArn: !GetAtt PrivateServicesTaskRole.Arn
       ContainerDefinitions:
         - Name: prefect-deployments
-          Image: !Sub
-            - ${URI}:${Tag}
-            - URI: !ImportValue
-                Fn::Sub: ${ProjectName}-ECRPrefectWorkerUri
+          Image: !If
+            - IsPlaceholder
+            - public.ecr.aws/docker/library/nginx:alpine
+            - !Sub
+              - ${URI}:${Tag}
+              - URI: !ImportValue
+                  Fn::Sub: ${ProjectName}-ECRPrefectWorkerUri
               Tag: !Ref ImageTag
           Essential: true
           Environment:
