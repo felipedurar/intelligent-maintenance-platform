@@ -32,6 +32,7 @@ class Settings(BaseSettings):
         default="http://localhost:5000",
         validation_alias="MLFLOW_TRACKING_URI",
     )
+    drift_report_dir: str = Field(default="reports/drift", validation_alias="DRIFT_REPORT_DIR")
 
 
 @lru_cache

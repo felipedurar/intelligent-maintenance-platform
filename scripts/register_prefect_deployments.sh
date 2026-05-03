@@ -25,3 +25,7 @@ prefect deploy src/training/train_model.py:train_ai4i_failure_classifier \
 prefect deploy src/rag/flows.py:index_rag_documentation \
   --name index-rag-documentation \
   --pool "$POOL_NAME"
+
+prefect deploy src/monitoring/flows.py:detect_ai4i_drift \
+  --name detect-ai4i-drift \
+  --pool "$POOL_NAME"

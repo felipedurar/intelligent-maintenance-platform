@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from model_serving.service import ModelServingService, get_model_serving_service
+from monitoring.metrics import elapsed_seconds, record_prediction, timer_start
 
 router = APIRouter()
 
@@ -44,8 +45,17 @@ def predict_failure(
     request: PredictionRequest,
     service: ModelServingService = Depends(get_model_serving_service),
 ) -> PredictionResponse:
+    started_at = timer_start()
     result = service.predict_failure(
         observation=request.observation.model_dump(),
         request_id=request.request_id,
+    )
+    record_prediction(
+        status=str(result.get("status", "unknown")),
+        latency_seconds=elapsed_seconds(started_at),
+        probability=result.get("failure_probability")
+        if isinstance(result.get("failure_probability"), float)
+        else None,
+        risk_class=result.get("risk_class") if isinstance(result.get("risk_class"), str) else None,
     )
     return PredictionResponse(**result)

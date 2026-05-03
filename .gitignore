@@ -9,6 +9,7 @@ data/incoming/*
 data/processed/*
 data/reference/*
 data/archive/*
+reports/drift/*
 !data/raw/.gitkeep
 !data/raw/*.dvc
 !data/incoming/.gitkeep
@@ -17,5 +18,7 @@ data/archive/*
 !data/reference/.gitkeep
 !data/reference/*.dvc
 !data/archive/.gitkeep
+!reports/.gitkeep
+!reports/drift/.gitkeep
 *.db
 *.sqlite

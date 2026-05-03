@@ -12,11 +12,12 @@ services:
       PYTHONPATH: /app/src
       DATABASE_URL: postgresql://datathon:datathon@postgres:5432/datathon
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-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}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4.1-mini}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       QDRANT_URL: http://qdrant:6333
       RAG_COLLECTION_NAME: datathon_docs
+      DRIFT_REPORT_DIR: reports/drift
     depends_on:
       postgres:
         condition: service_healthy
@@ -26,6 +27,7 @@ services:
         condition: service_started
     volumes:
       - ./src:/app/src:ro
+      - ./reports:/app/reports:ro
     command: uvicorn platform_api.main:app --host 0.0.0.0 --port 8000 --reload
 
   prefect-server:
@@ -54,11 +56,12 @@ services:
       DATABASE_URL: postgresql://datathon:datathon@postgres:5432/datathon
       PREFECT_API_URL: http://prefect-server:4200/api
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-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}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4.1-mini}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       QDRANT_URL: http://qdrant:6333
       RAG_COLLECTION_NAME: datathon_docs
+      DRIFT_REPORT_DIR: reports/drift
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,6 +76,7 @@ services:
     volumes:
       - ./src:/app/src:ro
       - ./data:/app/data
+      - ./reports:/app/reports
     command: >
       sh -c "until prefect work-pool ls >/dev/null 2>&1; do
       echo 'Waiting for Prefect API...'; sleep 2; done
@@ -120,6 +124,34 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: datathon-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      platform_api:
+        condition: service_started
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: datathon-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_started
+
   postgres:
     image: postgres:16-alpine
     container_name: datathon-postgres
@@ -160,3 +192,5 @@ volumes:
   postgres_data:
   mlflow_artifacts:
   qdrant_data:
+  prometheus_data:
+  grafana_data:

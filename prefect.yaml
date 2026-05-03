@@ -57,3 +57,17 @@ deployments:
       - rag
       - indexing
       - openai
+
+  - name: detect-ai4i-drift
+    entrypoint: src/monitoring/flows.py:detect_ai4i_drift
+    work_pool:
+      name: datathon-local
+      work_queue_name: default
+    parameters:
+      reference_path: data/reference/ai4i_reference.csv
+      current_path: data/processed/ai4i_features_latest.csv
+      report_dir: reports/drift
+    tags:
+      - monitoring
+      - drift
+      - psi

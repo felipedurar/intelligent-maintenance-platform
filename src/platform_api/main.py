@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from prometheus_client import make_asgi_app
 
 from platform_api.config import get_settings
 from platform_api.openapi import API_DESCRIPTION, OPENAPI_TAGS
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
         prefix=f"{settings.api_prefix}/monitoring",
         tags=["Monitoring"],
     )
+    app.mount("/metrics", make_asgi_app())
 
     @app.get("/", include_in_schema=False)
     def root_docs_redirect() -> RedirectResponse:

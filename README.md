@@ -121,6 +121,25 @@ Prefect UI:
 http://localhost:4200
 ```
 
+Prometheus UI:
+
+```text
+http://localhost:9090
+```
+
+Grafana UI:
+
+```text
+http://localhost:3000
+```
+
+Grafana is provisioned with the Prometheus datasource and a `Datathon Platform Observability`
+dashboard. The platform API exposes Prometheus metrics at:
+
+```text
+http://localhost:8080/metrics
+```
+
 The `prefect-deployments` service registers deployments automatically during `docker compose up`.
 The worker polls the `datathon-local` work pool and picks up runs after the deployments are registered.
 
@@ -130,6 +149,7 @@ After startup, the Prefect UI should show these deployments:
 - `ingest-incoming-ai4i-batches/incoming-ai4i-batches`
 - `train-ai4i-failure-classifier/train-ai4i-failure-classifier`
 - `index-rag-documentation/index-rag-documentation`
+- `detect-ai4i-drift/detect-ai4i-drift`
 
 If you need to register them manually, run:
 
@@ -163,6 +183,12 @@ Trigger the registered RAG indexing deployment:
 docker compose exec prefect-worker ./scripts/run_rag_indexing_deployment.sh
 ```
 
+Trigger the registered PSI drift detection deployment:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_drift_detection_deployment.sh
+```
+
 Run the initial AI4I CSV ingestion directly:
 
 ```bash
@@ -185,6 +211,12 @@ Run RAG indexing directly after setting `OPENAI_API_KEY`:
 
 ```bash
 docker compose exec prefect-worker ./scripts/run_rag_indexing.sh
+```
+
+Run PSI drift detection directly after a processed dataset exists:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_drift_detection.sh
 ```
 
 The RAG pipeline chunks `README.md`, `AGENTS.md`, `docs/`, and `docs_governance/`, embeds
@@ -240,6 +272,17 @@ data/processed/ai4i_features_latest.csv
 ```
 
 The training pipeline reads `ai4i_machine_features` from PostgreSQL, trains a baseline logistic-regression model and a challenger random-forest model, logs metrics/artifacts to MLflow, registers the best model as `ai4i-machine-failure-classifier`, and assigns the `champion` alias. The prediction endpoint loads that MLflow champion model.
+
+The monitoring flow compares `data/reference/ai4i_reference.csv` against
+`data/processed/ai4i_features_latest.csv` using PSI thresholds:
+
+- `< 0.10`: stable
+- `0.10 - 0.20`: warning
+- `>= 0.20`: drift detected
+
+If the reference file does not exist yet, the flow initializes it from the latest processed
+dataset. Drift reports are written to `reports/drift/` as JSON and HTML, and summary metrics
+plus artifacts are logged to MLflow.
 
 ## Documentation
 

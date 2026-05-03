@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from monitoring.metrics import elapsed_seconds, record_rag_search, timer_start
 from rag.retriever import RagRetriever, get_rag_retriever
 
 router = APIRouter()
@@ -42,5 +43,10 @@ def search(
     request: RagSearchRequest,
     retriever: RagRetriever = Depends(get_rag_retriever),
 ) -> RagSearchResponse:
+    started_at = timer_start()
     result = retriever.search(query=request.query, limit=request.limit)
+    record_rag_search(
+        status=str(result.get("status", "unknown")),
+        latency_seconds=elapsed_seconds(started_at),
+    )
     return RagSearchResponse(**result)
