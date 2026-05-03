@@ -167,6 +167,18 @@ Run the training pipeline directly after ingestion:
 docker compose exec prefect-worker ./scripts/run_training.sh
 ```
 
+Run the automated tests locally after installing dev dependencies:
+
+```bash
+pytest
+```
+
+Run live prediction smoke checks after the stack is up and the champion model exists:
+
+```bash
+./evaluation/run_prediction_smoke.sh
+```
+
 The initial flow reads:
 
 ```text

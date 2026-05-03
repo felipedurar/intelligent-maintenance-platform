@@ -1,0 +1,11 @@
+{
+  "request_id": "eval-medium-risk-001",
+  "observation": {
+    "product_type": "M",
+    "air_temperature_k": 300.4,
+    "process_temperature_k": 309.0,
+    "rotational_speed_rpm": 1370,
+    "torque_nm": 58.0,
+    "tool_wear_min": 210
+  }
+}

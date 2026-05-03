@@ -1,0 +1,11 @@
+{
+  "request_id": "eval-high-risk-001",
+  "observation": {
+    "product_type": "L",
+    "air_temperature_k": 302.0,
+    "process_temperature_k": 310.0,
+    "rotational_speed_rpm": 1320,
+    "torque_nm": 68.0,
+    "tool_wear_min": 230
+  }
+}

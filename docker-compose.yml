@@ -9,6 +9,7 @@ services:
     environment:
       APP_ENV: local
       LOG_LEVEL: INFO
+      PYTHONPATH: /app/src
       DATABASE_URL: postgresql://datathon:datathon@postgres:5432/datathon
       MLFLOW_TRACKING_URI: http://mlflow:5000
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -43,6 +44,7 @@ services:
     environment:
       APP_ENV: local
       LOG_LEVEL: INFO
+      PYTHONPATH: /app/src
       DATABASE_URL: postgresql://datathon:datathon@postgres:5432/datathon
       PREFECT_API_URL: http://prefect-server:4200/api
       MLFLOW_TRACKING_URI: http://mlflow:5000

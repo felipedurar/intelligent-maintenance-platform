@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
@@ -7,7 +9,7 @@ router = APIRouter()
 
 
 class MachineObservation(BaseModel):
-    product_type: str = Field(..., min_length=1, max_length=1, examples=["L"])
+    product_type: Literal["L", "M", "H"] = Field(..., examples=["L"])
     air_temperature_k: float = Field(..., examples=[298.1])
     process_temperature_k: float = Field(..., examples=[308.6])
     rotational_speed_rpm: float = Field(..., examples=[1551.0])

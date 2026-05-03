@@ -1,0 +1,14 @@
+{
+  "low_risk": {
+    "expected_risk_class": "low",
+    "max_failure_probability": 0.35
+  },
+  "medium_risk": {
+    "accepted_risk_classes": ["medium", "high"],
+    "min_failure_probability": 0.35
+  },
+  "high_risk": {
+    "expected_risk_class": "high",
+    "min_failure_probability": 0.7
+  }
+}
