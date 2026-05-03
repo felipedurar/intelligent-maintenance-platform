@@ -1,0 +1,194 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  IM Platform — ECR stack:
+  5 container image repositories + GitHub Actions OIDC provider + deploy role.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: intelligent-maintenance
+  GitHubOrg:
+    Type: String
+    Description: GitHub organization or username (ex. everton-vieira)
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository name (ex. intelligent-maintenance-platform)
+
+Resources:
+
+  # ── ECR Repositories ──────────────────────────────────────────────────────
+
+  ECRPlatformAPI:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: im/platform-api
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Keep last 10 prod images",
+              "selection": {
+                "tagStatus": "tagged",
+                "tagPrefixList": ["prod-"],
+                "countType": "imageCountMoreThan",
+                "countNumber": 10
+              },
+              "action": { "type": "expire" }
+            }]
+          }
+
+  ECRPrefectWorker:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: im/prefect-worker
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Keep last 10 prod images",
+              "selection": {
+                "tagStatus": "tagged",
+                "tagPrefixList": ["prod-"],
+                "countType": "imageCountMoreThan",
+                "countNumber": 10
+              },
+              "action": { "type": "expire" }
+            }]
+          }
+
+  ECRMLflow:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: im/mlflow
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  ECRPrometheus:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: im/prometheus
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  ECRGrafana:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: im/grafana
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  # ── GitHub Actions OIDC ───────────────────────────────────────────────────
+
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  GitHubActionsDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-github-deploy-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOIDCProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Permite apenas tags prod-* neste repositório
+                token.actions.githubusercontent.com:sub:
+                  !Sub repo:${GitHubOrg}/${GitHubRepo}:ref:refs/tags/prod-*
+      Policies:
+        - PolicyName: ECRPush
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                Resource:
+                  - !GetAtt ECRPlatformAPI.Arn
+                  - !GetAtt ECRPrefectWorker.Arn
+                  - !GetAtt ECRMLflow.Arn
+                  - !GetAtt ECRPrometheus.Arn
+                  - !GetAtt ECRGrafana.Arn
+        - PolicyName: ECSDeployPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:UpdateService
+                  - ecs:DescribeServices
+                  - ecs:RegisterTaskDefinition
+                  - ecs:DescribeTaskDefinition
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*
+        - PolicyName: S3CFNUpload
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub arn:aws:s3:::im-cfn-${AWS::AccountId}/*
+
+Outputs:
+
+  ECRPlatformAPIUri:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/im/platform-api
+    Export:
+      Name: !Sub ${ProjectName}-ECRPlatformAPIUri
+
+  ECRPrefectWorkerUri:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/im/prefect-worker
+    Export:
+      Name: !Sub ${ProjectName}-ECRPrefectWorkerUri
+
+  ECRMLflowUri:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/im/mlflow
+    Export:
+      Name: !Sub ${ProjectName}-ECRMLflowUri
+
+  ECRPrometheusUri:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/im/prometheus
+    Export:
+      Name: !Sub ${ProjectName}-ECRPrometheusUri
+
+  ECRGrafanaUri:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/im/grafana
+    Export:
+      Name: !Sub ${ProjectName}-ECRGrafanaUri
+
+  GitHubActionsDeployRoleArn:
+    Value: !GetAtt GitHubActionsDeployRole.Arn
+    Export:
+      Name: !Sub ${ProjectName}-GitHubActionsDeployRoleArn
