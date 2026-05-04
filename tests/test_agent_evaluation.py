@@ -107,3 +107,86 @@ def test_run_evaluation_writes_reports(monkeypatch, tmp_path: Path) -> None:
     assert latest_report.exists()
     assert latest_markdown.exists()
     assert result["summary"]["pass_rate"] == 1.0
+
+
+def test_run_evaluation_requires_ragas_when_requested(monkeypatch, tmp_path: Path) -> None:
+    golden_set = tmp_path / "golden.jsonl"
+    golden_set.write_text(
+        json.dumps(
+            {
+                "id": "case-1",
+                "query": "What is this?",
+                "expected_answer": "A predictive maintenance platform.",
+                "expected_tools": ["search_project_docs"],
+                "expected_contexts": ["README.md"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("evaluation.agent_eval.AgentOrchestrator", lambda: FakeOrchestrator())
+    monkeypatch.setattr("evaluation.agent_eval.get_rag_retriever", lambda: FakeRetriever())
+    monkeypatch.setattr(
+        "evaluation.agent_eval.evaluate_with_ragas",
+        lambda results: {"status": "skipped", "reason": "missing dependencies"},
+    )
+
+    try:
+        run_evaluation(
+            golden_set_path=golden_set,
+            report_dir=tmp_path / "reports",
+            use_judge=False,
+            use_ragas=True,
+            require_ragas=True,
+            log_mlflow=False,
+        )
+    except RuntimeError as exc:
+        assert "Required RAGAS evaluation failed" in str(exc)
+    else:
+        raise AssertionError("Expected required RAGAS evaluation to fail")
+
+
+def test_run_evaluation_reports_required_ragas_metrics(monkeypatch, tmp_path: Path) -> None:
+    golden_set = tmp_path / "golden.jsonl"
+    golden_set.write_text(
+        json.dumps(
+            {
+                "id": "case-1",
+                "query": "What is this?",
+                "expected_answer": "A predictive maintenance platform.",
+                "expected_tools": ["search_project_docs"],
+                "expected_contexts": ["README.md"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    ragas_metrics = {
+        "faithfulness": 0.91,
+        "answer_relevancy": 0.87,
+        "context_precision": 0.82,
+        "context_recall": 0.79,
+    }
+    monkeypatch.setattr("evaluation.agent_eval.AgentOrchestrator", lambda: FakeOrchestrator())
+    monkeypatch.setattr("evaluation.agent_eval.get_rag_retriever", lambda: FakeRetriever())
+    monkeypatch.setattr(
+        "evaluation.agent_eval.evaluate_with_ragas",
+        lambda results: {"status": "ok", "metrics": ragas_metrics},
+    )
+
+    result = run_evaluation(
+        golden_set_path=golden_set,
+        report_dir=tmp_path / "reports",
+        use_judge=False,
+        use_ragas=True,
+        require_ragas=True,
+        log_mlflow=False,
+    )
+
+    assert result["summary"]["ragas"]["status"] == "ok"
+    assert result["summary"]["ragas"]["metrics"] == ragas_metrics
+    latest_markdown = (tmp_path / "reports" / "agent_eval_latest.md").read_text(
+        encoding="utf-8"
+    )
+    for metric_name in ragas_metrics:
+        assert metric_name in latest_markdown

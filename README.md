@@ -280,12 +280,17 @@ Enable OpenAI LLM-as-judge when `OPENAI_API_KEY` is configured:
 docker compose exec prefect-worker ./scripts/run_agent_evaluation.sh --judge --mlflow
 ```
 
-Enable RAGAS after installing optional evaluation dependencies:
+Run required RAGAS evaluation after RAG indexing and after setting `OPENAI_API_KEY`:
 
 ```bash
-pip install -e ".[eval]"
-python -m evaluation.agent_eval --judge --ragas --mlflow
+docker compose exec prefect-worker ./scripts/run_ragas_evaluation.sh --mlflow
 ```
+
+This command fails if RAGAS is skipped or cannot calculate the four required metrics:
+`faithfulness`, `answer_relevancy`, `context_precision`, and `context_recall`.
+
+The same required RAGAS evaluation can also be run manually from GitHub Actions through the
+`LLM Evaluation` workflow when the `OPENAI_API_KEY` repository secret is configured.
 
 Run PSI drift detection directly after a processed dataset exists:
 

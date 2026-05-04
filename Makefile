@@ -10,7 +10,7 @@ MODEL_VERSION ?=
 APPROVED_BY ?=
 REASON ?= Manual approval after benchmark and fairness review.
 
-.PHONY: help install-dev install-eval install-torch-cpu pre-commit-install pre-commit-run format lint type security test quality coverage docker-config build up down logs ps shell-api shell-worker ingest train promote benchmark explainability rag-index drift agent-eval security-eval prediction-smoke clean
+.PHONY: help install-dev install-eval install-torch-cpu pre-commit-install pre-commit-run format lint type security test quality coverage docker-config build up down logs ps shell-api shell-worker ingest train promote benchmark explainability rag-index drift agent-eval ragas-eval security-eval prediction-smoke clean
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*##"; printf "\nDatathon AI Platform commands:\n\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-24s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -101,6 +101,9 @@ drift: ## Run PSI drift detection directly
 
 agent-eval: ## Run golden-set agent evaluation
 	$(DOCKER_COMPOSE) exec $(WORKER_SERVICE) ./scripts/run_agent_evaluation.sh
+
+ragas-eval: ## Run required RAGAS evaluation with 4 metrics
+	$(DOCKER_COMPOSE) exec $(WORKER_SERVICE) ./scripts/run_ragas_evaluation.sh --mlflow
 
 security-eval: ## Run deterministic security guardrail evaluation
 	$(DOCKER_COMPOSE) exec $(WORKER_SERVICE) ./scripts/run_security_evaluation.sh
