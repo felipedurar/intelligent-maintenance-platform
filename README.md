@@ -1,77 +1,139 @@
 # Datathon AI Platform
 
-This is the cloud AI platform for the FIAP Phase 05 Datathon.
+Plataforma de IA desenvolvida para o Datathon da Fase 05 da FIAP.
 
-The project now targets **predictive maintenance for industrial machines** using the **AI4I 2020 Predictive Maintenance Dataset**. The platform predicts machine failure risk, explains predictions, monitors data/model drift, and provides an OpenAI-powered assistant with RAG over project and governance documentation.
+O projeto resolve um problema de manutenção preditiva em máquinas industriais usando o dataset **AI4I 2020 Predictive Maintenance Dataset**. A solução combina ingestão de dados, engenharia de features, treinamento de modelos, registro no MLflow, API de predição, monitoramento de drift e um assistente com LLM e RAG para apoiar a interpretação técnica da plataforma.
 
-## Target Capabilities
+## Integrantes
 
-- Binary machine-failure prediction using AI4I process/sensor data.
-- Optional failure-mode diagnostics using `TWF`, `HDF`, `PWF`, `OSF`, and `RNF`.
-- MLflow experiment tracking and model registry.
-- Qdrant-backed RAG over project and governance documentation.
-- DVC dataset and golden-set versioning.
-- Cloud object storage for artifacts and DVC remotes.
-- FastAPI serving APIs.
-- AI assistant with OpenAI-powered tool calling.
-- Custom or managed RAG over project and governance documentation.
-- Prometheus/Grafana or cloud-native observability.
-- Evidently drift detection.
-- OpenAI traces, Langfuse, or TruLens tracing.
-- Cloud IAM/OIDC authentication and guardrails.
-- Model Card, System Card, LGPD plan, OWASP mapping, and red-team report.
+- Felipe Malaquias Durar
+- Everton Vieira Rodrigues
 
-## Proposed Modules
+## Objetivo
+
+O objetivo da plataforma é estimar o risco de falha de uma máquina industrial a partir de variáveis de processo, como temperatura, rotação, torque e desgaste da ferramenta.
+
+Além da predição em si, a solução foi desenhada para cobrir o ciclo completo de MLOps:
+
+- receber novos datasets em CSV;
+- validar e ingerir os dados;
+- gerar features para treinamento e inferência;
+- treinar modelos baseline e challengers;
+- registrar experimentos e modelos no MLflow;
+- servir o modelo aprovado pela API;
+- monitorar métricas operacionais e drift;
+- avaliar o agente/RAG com golden set, RAGAS e LLM-as-judge;
+- documentar governança, segurança, LGPD e promoção de modelos.
+
+## Visão Geral da Arquitetura
+
+A solução é organizada em serviços separados por responsabilidade:
+
+- **Platform API**: aplicação FastAPI responsável por expor endpoints de predição, chat, RAG, datasets, modelos, health checks e monitoramento.
+- **PostgreSQL**: banco relacional usado para armazenar dados ingeridos, features, metadados de datasets e dados de suporte da plataforma.
+- **Prefect Server e Worker**: orquestração de pipelines offline, como ingestão, treinamento, indexação RAG e detecção de drift.
+- **MLflow**: tracking de experimentos, versionamento e registry de modelos.
+- **Qdrant**: banco vetorial usado pelo RAG.
+- **Prometheus e Grafana**: coleta e visualização de métricas operacionais.
+- **OpenAI**: LLM para o agente conversacional, embeddings para RAG e avaliações opcionais com LLM-as-judge/RAGAS.
+
+O desenho evita que o upload de dados treine ou promova modelos automaticamente. Novos dados entram na plataforma, são validados e ingeridos, mas a criação de um novo modelo gera apenas um candidato. A promoção para produção exige aprovação humana.
+
+## Estrutura Principal
 
 ```text
 src/
-├── platform_api/      # Public API and route composition
-├── agent/             # OpenAI agent orchestration, tools, prompts
-├── rag/               # Chunking, embeddings, retrieval, generation support
-├── features/          # Predictive-maintenance feature engineering
-├── model_serving/     # MLflow-backed prediction service
-├── training/          # MLflow-backed training pipeline
-├── ingestion/         # CSV ingestion and validation
-├── monitoring/        # Metrics and drift hooks
-└── security/          # Guardrails, PII checks, auth helpers
+├── platform_api/          # API pública com FastAPI
+├── dataset_management/    # Upload, validação e metadados de datasets
+├── ingestion/             # Ingestão de CSVs AI4I e persistência no PostgreSQL
+├── features/              # Engenharia de features para manutenção preditiva
+├── training/              # Treinamento, avaliação, MLflow e promoção de modelos
+├── model_serving/         # Carregamento do modelo champion e predição
+├── rag/                   # Chunking, embeddings, Qdrant e busca semântica
+├── agent/                 # Orquestração do agente com ferramentas
+├── monitoring/            # Métricas, PSI e drift
+└── security/              # Guardrails de prompt, saída e restrição de tópico
 ```
-
-## Data Layout
 
 ```text
 data/
-├── raw/             # Original AI4I CSV snapshots, tracked by DVC
-├── incoming/        # New CSV batches waiting for ingestion
-├── processed/       # Cleaned and feature-engineered datasets
-├── reference/       # Reference data for drift detection
-└── golden_set/      # RAG/agent evaluation set
+├── raw/             # Dataset original versionado com DVC
+├── incoming/        # Novos CSVs recebidos para ingestão
+├── processed/       # Datasets processados e com features
+├── reference/       # Dataset de referência para drift
+├── archive/         # CSVs incoming já processados
+└── golden_set/      # Casos de avaliação do agente, RAG e segurança
 ```
 
-The initial dataset is a single CSV, but the ingestion design supports future CSV batches in `data/incoming/` or cloud object storage.
+## Dataset
 
-## Initial API
+O projeto usa o **AI4I 2020 Predictive Maintenance Dataset**, um dataset sintético inspirado em um processo de usinagem. As principais colunas são:
 
-The first implementation should expose route groups for:
+- `UDI`
+- `Product ID`
+- `Type`
+- `Air temperature [K]`
+- `Process temperature [K]`
+- `Rotational speed [rpm]`
+- `Torque [Nm]`
+- `Tool wear [min]`
+- `Machine failure`
+- `TWF`, `HDF`, `PWF`, `OSF`, `RNF`
 
-- `GET /api/v1/health`
-- `GET /api/v1/ready`
-- `POST /api/v1/chat`
-- `POST /api/v1/predictions`
-- `GET /api/v1/models/{model_name}/active`
-- `POST /api/v1/rag/search`
-- `GET /api/v1/monitoring/status`
+A variável principal de predição é `Machine failure`. As colunas de modo de falha podem ser usadas para análise, diagnóstico e explicabilidade, mas o modelo principal prevê se haverá falha ou não.
 
-The routes should be wired to placeholder modules first, then connected to OpenAI, the vector database, MLflow, PostgreSQL feature tables, and the trained predictive-maintenance model.
+## Engenharia de Features
 
-## Run With Docker Compose
+A plataforma não usa apenas as colunas brutas. Durante a ingestão, são criadas features derivadas para representar melhor o comportamento físico do processo, por exemplo:
 
-Start the platform API, PostgreSQL, MLflow, Prefect server, and Prefect worker:
+- diferença entre temperatura de processo e temperatura do ar;
+- potência aproximada a partir de torque e rotação;
+- indicadores de risco por desgaste de ferramenta;
+- variáveis categóricas do tipo de produto;
+- combinações úteis para capturar cenários de sobrecarga, dissipação térmica e esforço mecânico.
+
+Essas features são persistidas no PostgreSQL e também exportadas para `data/processed/`, permitindo auditoria, reprodutibilidade e uso em relatórios de drift.
+
+## Como Executar Localmente
+
+Crie um arquivo `.env` a partir do exemplo:
+
+```bash
+cp .env.example .env
+```
+
+Se for usar chat, RAG, RAGAS ou LLM-as-judge, configure `OPENAI_API_KEY` no `.env`. Nunca commite esse arquivo.
+
+Suba a plataforma:
 
 ```bash
 docker compose up --build
 ```
 
-Common development shortcuts are available through `make`:
+Serviços principais:
+
+```text
+API FastAPI:      http://localhost:8080
+Swagger:          http://localhost:8080/api/v1/docs
+MLflow:           http://localhost:5000
+Prefect:          http://localhost:4200
+Qdrant:           http://localhost:6333
+Prometheus:       http://localhost:9090
+Grafana:          http://localhost:3000
+PostgreSQL local: localhost:5433
+```
+
+Credenciais locais padrão do PostgreSQL:
+
+```text
+usuário: datathon
+senha:   datathon
+banco:   datathon
+```
+
+## Comandos Úteis
+
+O projeto inclui um `Makefile` para facilitar o desenvolvimento:
 
 ```bash
 make help
@@ -84,117 +146,33 @@ make agent-eval
 make security-eval
 ```
 
-The repository also includes `.pre-commit-config.yaml` with file hygiene checks, Ruff
-format/lint, mypy, Bandit, and a pre-push pytest hook.
-
-PyTorch is used by the offline training worker for the MLP challenger. It is intentionally not
-installed in the online API image. For local MLP training outside Docker, install the CPU build:
+Para treinamento local do modelo PyTorch MLP fora do Docker:
 
 ```bash
 make install-torch-cpu
 ```
 
-The API and worker are separate runtime images:
+## Ingestão de Dados
 
-- `Dockerfile.api`: online FastAPI service for chat, predictions, RAG search, and metadata.
-- `Dockerfile.worker`: offline Prefect worker for ingestion, feature builds, training, drift, and RAG indexing.
-- `Dockerfile.mlflow`: MLflow tracking server and model registry runtime.
-
-Qdrant UI/API:
+O dataset inicial fica em:
 
 ```text
-http://localhost:6333
+data/raw/ai4i2020.csv
 ```
 
-Open the FastAPI docs:
-
-```text
-http://localhost:8080/api/v1/docs
-```
-
-PostgreSQL is exposed locally on port `5433` and used by the API inside Compose as:
-
-```text
-postgresql://datathon:datathon@postgres:5432/datathon
-```
-
-The same PostgreSQL service also stores Prefect server metadata in a separate `prefect` database:
-
-```text
-postgresql+asyncpg://datathon:datathon@postgres:5432/prefect
-```
-
-The same PostgreSQL service also stores MLflow metadata in a separate `mlflow` database:
-
-```text
-postgresql+psycopg2://datathon:datathon@postgres:5432/mlflow
-```
-
-The `postgres-init` service creates these databases automatically if they are missing, including when a previous Docker volume already exists.
-
-MLflow UI:
-
-```text
-http://localhost:5000
-```
-
-Prefect UI:
-
-```text
-http://localhost:4200
-```
-
-Prometheus UI:
-
-```text
-http://localhost:9090
-```
-
-Grafana UI:
-
-```text
-http://localhost:3000
-```
-
-Grafana is provisioned with the Prometheus datasource and a `Datathon Platform Observability`
-dashboard. The platform API exposes Prometheus metrics at:
-
-```text
-http://localhost:8080/metrics
-```
-
-The `prefect-deployments` service registers deployments automatically during `docker compose up`.
-The worker polls the `datathon-local` work pool and picks up runs after the deployments are registered.
-
-After startup, the Prefect UI should show these deployments:
-
-- `ingest-initial-ai4i-dataset/initial-ai4i-dataset`
-- `ingest-incoming-ai4i-batches/incoming-ai4i-batches`
-- `train-ai4i-failure-classifier/train-ai4i-failure-classifier`
-- `index-rag-documentation/index-rag-documentation`
-- `detect-ai4i-drift/detect-ai4i-drift`
-
-If you need to register them manually, run:
-
-```bash
-docker compose run --rm prefect-deployments
-```
-
-You can trigger deployments from the UI, or run the flow directly from the worker container during development.
-
-Trigger the registered initial ingestion deployment:
+A ingestão inicial pode ser executada pelo deployment do Prefect:
 
 ```bash
 docker compose exec prefect-worker ./scripts/run_initial_ingestion_deployment.sh
 ```
 
-Trigger the registered incoming-batch ingestion deployment:
+Ou diretamente no worker:
 
 ```bash
-docker compose exec prefect-worker ./scripts/run_incoming_ingestion_deployment.sh
+docker compose exec prefect-worker ./scripts/run_initial_ingestion.sh
 ```
 
-Upload a new AI4I-compatible CSV batch through the API:
+Para novos dados, a forma recomendada é usar a API de upload:
 
 ```bash
 curl -X POST "http://localhost:8080/api/v1/datasets/upload" \
@@ -202,11 +180,9 @@ curl -X POST "http://localhost:8080/api/v1/datasets/upload" \
   -F "trigger_ingestion=true"
 ```
 
-The upload endpoint validates the CSV schema, stores it in `data/incoming/`, records dataset
-metadata in PostgreSQL, and optionally triggers the incoming-ingestion Prefect deployment. It
-does not train or promote a model automatically.
+Esse endpoint valida o schema do CSV, salva o arquivo em `data/incoming/`, registra metadados no PostgreSQL e, se solicitado, dispara o deployment de ingestão de novos lotes no Prefect.
 
-Dataset-management endpoints:
+Endpoints de gestão de datasets:
 
 ```text
 POST /api/v1/datasets/upload
@@ -217,145 +193,233 @@ POST /api/v1/datasets/ingest
 POST /api/v1/datasets/retrain
 ```
 
-Trigger the registered training deployment:
+O fluxo operacional recomendado para novos dados é:
+
+```text
+upload do CSV
+-> validação e armazenamento em incoming
+-> ingestão pelo Prefect
+-> exportação do dataset processado
+-> verificação de drift
+-> treinamento, se fizer sentido
+-> registro de modelo candidato
+-> análise de benchmark/fairness
+-> aprovação humana
+-> promoção para champion
+```
+
+## Treinamento e MLflow
+
+O pipeline de treinamento lê as features do PostgreSQL, treina modelos candidatos e registra tudo no MLflow.
+
+Modelos implementados:
+
+- regressão logística como baseline;
+- random forest e extra trees como challengers clássicos;
+- MLP em PyTorch como challenger neural, quando PyTorch está disponível no worker.
+
+O ranking prioriza **average precision**, porque falhas são eventos raros no AI4I. Também são avaliadas métricas como recall, F1, precisão, ROC AUC e matriz de confusão.
+
+Executar treinamento pelo deployment:
 
 ```bash
 docker compose exec prefect-worker ./scripts/run_training_deployment.sh
 ```
 
-Trigger the registered RAG indexing deployment:
-
-```bash
-docker compose exec prefect-worker ./scripts/run_rag_indexing_deployment.sh
-```
-
-Trigger the registered PSI drift detection deployment:
-
-```bash
-docker compose exec prefect-worker ./scripts/run_drift_detection_deployment.sh
-```
-
-Run the initial AI4I CSV ingestion directly:
-
-```bash
-docker compose exec prefect-worker ./scripts/run_initial_ingestion.sh
-```
-
-Run future incoming-batch ingestion directly after placing CSV files in `data/incoming/`:
-
-```bash
-docker compose exec prefect-worker ./scripts/run_incoming_ingestion.sh
-```
-
-Run the training pipeline directly after ingestion:
+Executar diretamente:
 
 ```bash
 docker compose exec prefect-worker ./scripts/run_training.sh
 ```
 
-The training flow registers the best model as an MLflow `candidate` with
-`approval_status=pending`. It does not update production serving by itself.
+O melhor modelo é registrado no MLflow como `candidate`, com `approval_status=pending`. Ele não substitui o modelo em produção automaticamente.
 
-Promote a reviewed candidate to the `champion` alias after benchmark and fairness artifacts
-have been generated:
+## Promoção de Modelo
+
+A API de predição usa o modelo com alias `champion` no MLflow. Para promover um candidato, é necessário passar por uma etapa explícita de aprovação humana.
+
+Exemplo:
 
 ```bash
 docker compose exec prefect-worker ./scripts/promote_model.sh \
   --approved-by "felipe" \
-  --reason "Benchmark and fairness reports reviewed for demo release"
+  --reason "Benchmark e fairness revisados para a entrega do Datathon"
 ```
 
-You can promote a specific MLflow model version with `--version`.
+Também é possível promover uma versão específica com `--version`.
 
-Run RAG indexing directly after setting `OPENAI_API_KEY`:
+Esse processo registra informações como aprovador, data e justificativa da promoção.
+
+## API de Predição
+
+Endpoint principal:
+
+```text
+POST /api/v1/predictions
+```
+
+A API recebe uma observação de máquina, aplica a mesma engenharia de features usada no treinamento e retorna:
+
+- probabilidade de falha;
+- classe de risco;
+- versão do modelo usado;
+- metadados úteis para auditoria.
+
+## RAG e Agente
+
+O RAG indexa a documentação do projeto e arquivos de governança:
+
+```text
+README.md
+AGENTS.md
+docs/
+docs_governance/
+```
+
+Rodar indexação RAG:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_rag_indexing_deployment.sh
+```
+
+Ou diretamente:
 
 ```bash
 docker compose exec prefect-worker ./scripts/run_rag_indexing.sh
 ```
 
-Run the golden-set agent evaluation with deterministic checks:
+Endpoints relacionados:
 
-```bash
-docker compose exec prefect-worker ./scripts/run_agent_evaluation.sh
+```text
+POST /api/v1/rag/search
+POST /api/v1/chat
 ```
 
-Run the deterministic security guardrail evaluation:
+O agente usa OpenAI com tool calling. As ferramentas disponíveis permitem:
 
-```bash
-docker compose exec prefect-worker ./scripts/run_security_evaluation.sh
-```
+- buscar documentação do projeto;
+- consultar o modelo ativo;
+- executar predições de falha de máquina.
 
-Generate the model benchmark report with at least three candidate configurations:
+Assim, o usuário pode fazer perguntas em linguagem natural, e o agente pode combinar contexto documental com chamadas reais à API/modelo.
 
-```bash
-docker compose exec prefect-worker ./scripts/run_model_benchmark.sh
-```
+## Avaliação do Agente e RAGAS
 
-Generate explainability and fairness artifacts:
-
-```bash
-docker compose exec prefect-worker ./scripts/run_explainability_fairness.sh
-```
-
-Enable OpenAI LLM-as-judge when `OPENAI_API_KEY` is configured:
-
-```bash
-docker compose exec prefect-worker ./scripts/run_agent_evaluation.sh --judge --mlflow
-```
-
-Run required RAGAS evaluation after RAG indexing and after setting `OPENAI_API_KEY`:
-
-```bash
-docker compose exec prefect-worker ./scripts/run_ragas_evaluation.sh --mlflow
-```
-
-This command fails if RAGAS is skipped or cannot calculate the four required metrics:
-`faithfulness`, `answer_relevancy`, `context_precision`, and `context_recall`.
-
-The same required RAGAS evaluation can also be run manually from GitHub Actions through the
-`LLM Evaluation` workflow when the `OPENAI_API_KEY` repository secret is configured.
-
-Run PSI drift detection directly after a processed dataset exists:
-
-```bash
-docker compose exec prefect-worker ./scripts/run_drift_detection.sh
-```
-
-The RAG pipeline chunks `README.md`, `AGENTS.md`, `docs/`, and `docs_governance/`, embeds
-the chunks with OpenAI embeddings, and upserts them into Qdrant. The `/api/v1/rag/search`
-endpoint queries that index. The `/api/v1/chat` endpoint uses OpenAI tool calling with these
-platform tools:
-
-- `search_project_docs`
-- `get_active_model`
-- `predict_machine_failure`
-
-The chat route is protected by deterministic security guardrails before and after the agent:
-
-- prompt-injection blocking for attempts to override instructions or reveal hidden prompts/secrets;
-- topic restriction to predictive maintenance, AI4I, model operations, RAG, monitoring, deployment, and governance;
-- output sanitization for API keys, JWT-like tokens, database URLs, password/token fields, internal prompt leakage, and unsafe automation claims;
-- Prometheus counter `security_guardrail_events_total` for blocked and sanitized events.
-
-The agent evaluation golden set lives at:
+O golden set do agente fica em:
 
 ```text
 data/golden_set/agent_eval.jsonl
 ```
 
-Security adversarial examples live at:
+Rodar avaliação determinística:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_agent_evaluation.sh
+```
+
+Rodar avaliação com LLM-as-judge:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_agent_evaluation.sh --judge --mlflow
+```
+
+Rodar RAGAS obrigatório:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_ragas_evaluation.sh --mlflow
+```
+
+A avaliação RAGAS calcula e reporta quatro métricas:
+
+- `faithfulness`
+- `answer_relevancy`
+- `context_precision`
+- `context_recall`
+
+O workflow `LLM Evaluation` no GitHub Actions também pode executar essa avaliação quando o secret `OPENAI_API_KEY` estiver configurado.
+
+## Monitoramento e Drift
+
+A API expõe métricas Prometheus em:
+
+```text
+http://localhost:8080/metrics
+```
+
+O Grafana já é provisionado com datasource do Prometheus e dashboard da plataforma.
+
+Rodar detecção de drift:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_drift_detection_deployment.sh
+```
+
+Ou diretamente:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_drift_detection.sh
+```
+
+O drift é calculado com PSI comparando:
+
+```text
+data/reference/ai4i_reference.csv
+data/processed/ai4i_features_latest.csv
+```
+
+Critérios usados:
+
+```text
+PSI < 0.10       estável
+0.10 a 0.20     atenção
+PSI >= 0.20     drift detectado
+```
+
+Relatórios são gravados em:
+
+```text
+reports/drift/
+```
+
+## Segurança e Guardrails
+
+O chat possui guardrails antes e depois da chamada ao agente:
+
+- bloqueio de prompt injection;
+- restrição de assunto ao domínio da plataforma;
+- sanitização de chaves, tokens, URLs de banco e possíveis segredos;
+- bloqueio de respostas que tentem expor prompts internos;
+- métrica Prometheus `security_guardrail_events_total`.
+
+Os exemplos adversariais ficam em:
 
 ```text
 data/golden_set/security_eval.jsonl
 ```
 
-It evaluates the chat agent with:
+Rodar avaliação de segurança:
 
-- deterministic checks for expected tool usage, retrieved source recall, and non-empty answers;
-- optional OpenAI LLM-as-judge scoring for answer quality, groundedness, safety, and tool/context use;
-- optional RAGAS metrics for faithfulness, answer relevancy, context precision, and context recall.
+```bash
+docker compose exec prefect-worker ./scripts/run_security_evaluation.sh
+```
 
-Reports are written to:
+## Benchmark, Explicabilidade e Fairness
+
+Gerar benchmark dos modelos:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_model_benchmark.sh
+```
+
+Gerar artefatos de explicabilidade e fairness:
+
+```bash
+docker compose exec prefect-worker ./scripts/run_explainability_fairness.sh
+```
+
+Esses relatórios comparam modelos, mostram importância de features e analisam métricas por grupo de produto (`L`, `M` e `H`).
+
+Relatórios principais:
 
 ```text
 evaluation/reports/agent_eval_latest.json
@@ -366,93 +430,49 @@ evaluation/reports/explainability_fairness_latest.json
 evaluation/reports/explainability_fairness_latest.md
 ```
 
-Run the automated tests locally after installing dev dependencies:
+## DVC
+
+Arquivos de dados não devem ser versionados diretamente no Git. O dataset original deve ser controlado com DVC:
 
 ```bash
-pytest
+dvc add data/raw/ai4i2020.csv
+git add data/raw/ai4i2020.csv.dvc data/raw/.gitignore
 ```
 
-Run live prediction smoke checks after the stack is up and the champion model exists:
+Depois, configure um remote DVC adequado para a entrega, como S3, Azure Blob, Google Cloud Storage ou outro storage compatível.
+
+## Qualidade e CI/CD
+
+O projeto possui:
+
+- GitHub Actions para lint, type check, testes, cobertura, Bandit e build das imagens Docker;
+- pre-commit com Ruff, mypy, Bandit e verificações de higiene de arquivos;
+- workflow separado para avaliação LLM/RAGAS;
+- workflow de deploy com infraestrutura em CloudFormation.
+
+Rodar a qualidade localmente:
 
 ```bash
-./evaluation/run_prediction_smoke.sh
+make quality
 ```
 
-The initial flow reads:
+Ou manualmente:
 
-```text
-data/raw/ai4i2020.csv
+```bash
+ruff check src tests evaluation
+mypy src evaluation
+bandit -r src -c pyproject.toml
+pytest tests --cov=src --cov-report=term-missing --cov-report=xml
 ```
 
-The incoming flow scans:
+## Documentação
 
-```text
-data/incoming/*.csv
-```
-
-and moves processed incoming files to:
-
-```text
-data/archive/
-```
-
-Both ingestion flows also export engineered snapshots to:
-
-```text
-data/processed/ai4i_features_<batch_id>.csv
-data/processed/ai4i_features_latest.csv
-```
-
-The recommended operational flow for new CSV data is:
-
-```text
-upload CSV -> validate/store incoming file -> trigger ingestion -> run drift check
--> trigger training if needed -> register candidate -> benchmark/fairness evidence
--> human approval -> champion promotion
-```
-
-The training pipeline reads `ai4i_machine_features` from PostgreSQL, trains a baseline
-logistic-regression model and a challenger random-forest model, logs metrics/artifacts to
-MLflow, registers the best model as `ai4i-machine-failure-classifier`, and assigns the
-`candidate` alias. A separate human approval command checks benchmark and fairness reports,
-records `approved_by`, `approved_at`, and `promotion_reason`, then assigns the `champion`
-alias. The prediction endpoint loads that approved MLflow champion model.
-
-The training pipeline also trains a PyTorch MLP deep challenger when PyTorch is installed in
-the training runtime. All candidates are logged through a common MLflow pyfunc serving contract
-that returns `failure_probability`, so the champion model can be sklearn or PyTorch without
-changing the prediction API.
-
-The benchmark report compares logistic regression, random forest, extra trees, and PyTorch MLP
-when PyTorch is available. It ranks models by average precision first because machine failures
-are rare in AI4I, then by recall and F1. The explainability/fairness report trains the best
-candidate, computes permutation importance, and compares precision, recall, false positive
-rate, and false negative rate across `L`, `M`, and `H` product groups.
-
-The monitoring flow compares `data/reference/ai4i_reference.csv` against
-`data/processed/ai4i_features_latest.csv` using PSI thresholds:
-
-- `< 0.10`: stable
-- `0.10 - 0.20`: warning
-- `>= 0.20`: drift detected
-
-If the reference file does not exist yet, the flow initializes it from the latest processed
-dataset. Drift reports are written to `reports/drift/` as JSON and HTML, and summary metrics
-plus artifacts are logged to MLflow.
-
-## Documentation
-
-- [Architecture](docs/architecture.md)
+- [Arquitetura](docs/architecture.md)
 - [Stack](docs/stack.md)
-- [Predictive Maintenance Model](docs/predictive-maintenance-model.md)
+- [Modelo de Manutenção Preditiva](docs/predictive-maintenance-model.md)
+- [Deploy](docs/deployment.md)
+- [Governança e LGPD](docs_governance/LGPD_PLAN.md)
 
-## First Implementation Milestones
+## Observação Sobre Chaves de API
 
-1. Add AI4I CSV ingestion and schema validation.
-2. Add feature engineering for process/sensor features.
-3. Build a baseline classifier with MLflow logging.
-4. Add model serving for failure probability and risk class.
-5. Add DVC dataset versioning and reference drift dataset.
-6. Add RAG indexing/search over docs and governance files.
-7. Add `/api/chat` with OpenAI tool calling for prediction, model metadata, drift status, and RAG.
-8. Add monitoring, drift jobs, and governance docs.
+Chaves como `OPENAI_API_KEY` devem ficar apenas no `.env` local ou em secrets do GitHub/AWS. Se uma chave for exposta por engano, ela deve ser revogada e recriada imediatamente.
