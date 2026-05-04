@@ -1022,6 +1022,10 @@ Resources:
       TaskDefinition: !Ref TaskDefMLflow
       DesiredCount: 1
       LaunchType: FARGATE
+      AvailabilityZoneRebalancing: DISABLED
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
@@ -1104,6 +1108,10 @@ Resources:
       TaskDefinition: !Ref TaskDefPrometheus
       DesiredCount: 1
       LaunchType: FARGATE
+      AvailabilityZoneRebalancing: DISABLED
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
@@ -1123,6 +1131,10 @@ Resources:
       TaskDefinition: !Ref TaskDefGrafana
       DesiredCount: 1
       LaunchType: FARGATE
+      AvailabilityZoneRebalancing: DISABLED
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
