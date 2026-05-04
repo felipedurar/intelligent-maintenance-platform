@@ -1,6 +1,8 @@
 MODEL_NAME = "ai4i-machine-failure-classifier"
 EXPERIMENT_NAME = "ai4i-predictive-maintenance"
 CHAMPION_ALIAS = "champion"
+CANDIDATE_ALIAS = "candidate"
+PREVIOUS_CHAMPION_ALIAS = "previous_champion"
 TARGET_COLUMN = "machine_failure"
 
 FEATURE_COLUMNS = [

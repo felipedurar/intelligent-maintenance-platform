@@ -234,6 +234,7 @@ def run_evaluation(
     report_dir: Path = DEFAULT_REPORT_DIR,
     use_judge: bool = False,
     use_ragas: bool = False,
+    require_ragas: bool = False,
     log_mlflow: bool = False,
     context_limit: int = 5,
 ) -> dict[str, Any]:
@@ -249,6 +250,9 @@ def run_evaluation(
         for sample in samples
     ]
     ragas = evaluate_with_ragas(results) if use_ragas else {"status": "skipped"}
+    if require_ragas and ragas.get("status") != "ok":
+        reason = ragas.get("reason") or "RAGAS did not return status=ok."
+        raise RuntimeError(f"Required RAGAS evaluation failed: {reason}")
     summary = aggregate_results(results, ragas)
     report_path = write_reports(report_dir, summary, results)
     if log_mlflow:
@@ -265,6 +269,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--judge", action="store_true", help="Enable OpenAI LLM-as-judge.")
     parser.add_argument("--ragas", action="store_true", help="Enable optional RAGAS evaluation.")
+    parser.add_argument(
+        "--require-ragas",
+        action="store_true",
+        help="Fail if RAGAS metrics are skipped or fail.",
+    )
     parser.add_argument("--mlflow", action="store_true", help="Log summary metrics and report to MLflow.")
     parser.add_argument("--context-limit", type=int, default=5)
     return parser.parse_args()
@@ -277,6 +286,7 @@ def main() -> None:
         report_dir=args.report_dir,
         use_judge=args.judge,
         use_ragas=args.ragas,
+        require_ragas=args.require_ragas,
         log_mlflow=args.mlflow,
         context_limit=args.context_limit,
     )

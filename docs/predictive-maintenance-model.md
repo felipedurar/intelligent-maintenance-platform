@@ -130,6 +130,7 @@ Current implementation:
 - deep challenger: PyTorch MLP with standardized tabular inputs, class-imbalance weighting, dropout, and early stopping when PyTorch is available in the training runtime.
 - selection metric: average precision first, then recall and F1 as tie-breakers.
 - registry name: `ai4i-machine-failure-classifier`.
+- training alias: `candidate`.
 - serving alias: `champion`.
 - serving flavor: MLflow pyfunc wrapper returning `failure_probability`, so sklearn and PyTorch candidates share the same production serving contract.
 
@@ -154,6 +155,19 @@ Serving should:
 4. Apply the same feature transformations used during training.
 5. Return failure probability, risk class, model version, feature version, and explanation metadata.
 6. Emit metrics for latency, errors, prediction counts, model version, and risk-class distribution.
+
+## Promotion Gate
+
+Training and production promotion are intentionally separate:
+
+1. The training flow registers the best model version and points the MLflow `candidate` alias to it.
+2. The candidate version must have `approval_status=pending` and `validation_status=passed`.
+3. Benchmark and explainability/fairness reports must exist and have `status=ok`.
+4. A human reviewer runs `scripts/promote_model.sh` with `--approved-by` and `--reason`.
+5. The promotion command tags the model version with `approval_status=approved`,
+   `approved_by`, `approved_at`, and `promotion_reason`.
+6. The previous production version is preserved with the `previous_champion` alias before
+   the new version receives the `champion` alias.
 
 ## Drift Contract
 

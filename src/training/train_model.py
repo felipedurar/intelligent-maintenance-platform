@@ -18,6 +18,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from training.constants import (
+    CANDIDATE_ALIAS,
     CHAMPION_ALIAS,
     EXPERIMENT_NAME,
     FEATURE_COLUMNS,
@@ -124,7 +125,8 @@ def train_candidates(
                     "framework": "pytorch" if "pytorch" in candidate_name else "scikit-learn",
                     "owner": "datathon-ai-platform",
                     "risk_level": "medium",
-                    "approval_status": "candidate",
+                    "approval_status": "training_candidate",
+                    "validation_status": "passed",
                     "training_data_version": os.getenv("TRAINING_DATA_VERSION", "local-postgres"),
                     "feature_version": "ai4i-v1",
                     "git_sha": os.getenv("GIT_SHA", "local"),
@@ -195,12 +197,40 @@ def register_best_model(
         key="candidate_name",
         value=best["candidate_name"],
     )
-    client.set_registered_model_alias(MODEL_NAME, CHAMPION_ALIAS, model_version.version)
+    governance_tags = {
+        "approval_status": "pending",
+        "validation_status": "passed",
+        "candidate_name": best["candidate_name"],
+        "best_run_id": best["run_id"],
+        "promotion_required": "true",
+        "approved_by": "",
+        "approved_at": "",
+        "promotion_reason": "",
+    }
+    for key, value in governance_tags.items():
+        client.set_model_version_tag(
+            name=MODEL_NAME,
+            version=model_version.version,
+            key=key,
+            value=value,
+        )
+    for metric_name, metric_value in best["metrics"].items():
+        if isinstance(metric_value, Real):
+            client.set_model_version_tag(
+                name=MODEL_NAME,
+                version=model_version.version,
+                key=f"metric_{metric_name}",
+                value=str(float(metric_value)),
+            )
+    client.set_registered_model_alias(MODEL_NAME, CANDIDATE_ALIAS, model_version.version)
 
     return {
         "model_name": MODEL_NAME,
         "model_version": model_version.version,
+        "candidate_alias": CANDIDATE_ALIAS,
         "champion_alias": CHAMPION_ALIAS,
+        "approval_status": "pending",
+        "promotion_required": True,
         "best_candidate": best["candidate_name"],
         "best_run_id": best["run_id"],
         "best_metrics": best["metrics"],

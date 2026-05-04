@@ -48,12 +48,17 @@ Run OpenAI LLM-as-judge and log the report to MLflow:
 docker compose exec prefect-worker ./scripts/run_agent_evaluation.sh --judge --mlflow
 ```
 
-Run optional RAGAS metrics after installing evaluation extras:
+Run required RAGAS metrics after RAG indexing and after setting `OPENAI_API_KEY`:
 
 ```bash
-pip install -e ".[eval]"
-python -m evaluation.agent_eval --judge --ragas --mlflow
+docker compose exec prefect-worker ./scripts/run_ragas_evaluation.sh --mlflow
 ```
+
+This command fails if RAGAS is skipped or cannot calculate the four checklist metrics:
+`faithfulness`, `answer_relevancy`, `context_precision`, and `context_recall`.
+
+The repository also includes a manual GitHub Actions workflow, `LLM Evaluation`, that runs RAG
+indexing and the required RAGAS evaluation when the `OPENAI_API_KEY` repository secret is set.
 
 Reports are written to `evaluation/reports/agent_eval_latest.json` and
 `evaluation/reports/agent_eval_latest.md`.

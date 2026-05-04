@@ -4,6 +4,13 @@ from typing import Any
 
 from evaluation.schemas import AgentEvalResult
 
+REQUIRED_RAGAS_METRICS = {
+    "faithfulness",
+    "answer_relevancy",
+    "context_precision",
+    "context_recall",
+}
+
 
 def evaluate_with_ragas(results: list[AgentEvalResult]) -> dict[str, Any]:
     """Run RAGAS when optional evaluation dependencies are installed.
@@ -42,9 +49,19 @@ def evaluate_with_ragas(results: list[AgentEvalResult]) -> dict[str, Any]:
             metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
         )
         score_dict = dict(scores)
+        missing_metrics = REQUIRED_RAGAS_METRICS.difference(score_dict)
+        if missing_metrics:
+            return {
+                "status": "failed",
+                "reason": f"RAGAS did not return required metrics: {sorted(missing_metrics)}",
+            }
         return {
             "status": "ok",
-            "metrics": {key: float(value) for key, value in score_dict.items() if value is not None},
+            "metrics": {
+                key: float(score_dict[key])
+                for key in sorted(REQUIRED_RAGAS_METRICS)
+                if score_dict[key] is not None
+            },
         }
     except Exception as exc:
         return {"status": "failed", "reason": str(exc)}
