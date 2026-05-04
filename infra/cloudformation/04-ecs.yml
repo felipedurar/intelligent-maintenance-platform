@@ -399,6 +399,7 @@ Resources:
         - Name: postgres
           Image: postgres:16-alpine
           Essential: true
+          User: "999:999"
           PortMappings:
             - ContainerPort: 5432
               Protocol: tcp
@@ -478,25 +479,17 @@ Resources:
             - Name: MLFLOW_ARTIFACTS_DESTINATION
               Value: !Sub s3://im-artifacts-${AWS::AccountId}/mlflow
           Secrets:
-            - Name: DATABASE_URL
+            - Name: MLFLOW_BACKEND_STORE_URI
               ValueFrom: !Sub
-                - "${ARN}:DATABASE_URL::"
+                - "${ARN}:MLFLOW_BACKEND_STORE_URI::"
                 - ARN: !ImportValue
                     Fn::Sub: ${ProjectName}-SecretDBPasswordArn
-          Command:
-            - mlflow
-            - server
-            - --host
-            - "0.0.0.0"
-            - --port
-            - "5000"
-            - --backend-store-uri
-            - !Sub
-              - "postgresql+psycopg2://datathon:$(POSTGRES_PASSWORD)@postgres.im.local:5432/mlflow"
-              - {}
-            - --serve-artifacts
-            - --artifacts-destination
-            - !Sub s3://im-artifacts-${AWS::AccountId}/mlflow
+          Command: !If
+            - IsPlaceholder
+            - ["nginx", "-g", "daemon off;"]
+            - - sh
+              - -c
+              - !Sub "mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri $MLFLOW_BACKEND_STORE_URI --serve-artifacts --artifacts-destination s3://im-artifacts-${AWS::AccountId}/mlflow"
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -556,12 +549,7 @@ Resources:
                 - "${ARN}:PREFECT_API_DATABASE_CONNECTION_URL::"
                 - ARN: !ImportValue
                     Fn::Sub: ${ProjectName}-SecretDBPasswordArn
-          Command:
-            - prefect
-            - server
-            - start
-            - --host
-            - "0.0.0.0"
+          Command: ["prefect", "server", "start", "--host", "0.0.0.0"]
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -622,7 +610,7 @@ Resources:
               - ${URI}:${Tag}
               - URI: !ImportValue
                   Fn::Sub: ${ProjectName}-ECRPrefectWorkerUri
-              Tag: !Ref ImageTag
+                Tag: !Ref ImageTag
           Essential: true
           MountPoints:
             - SourceVolume: efs-reports
@@ -753,12 +741,12 @@ Resources:
         - Name: prometheus
           Image: !If
             - IsPlaceholder
-            - public.ecr.aws/docker/library/nginx:alpine
+            - prom/prometheus:v2.55.1
             - !Sub
               - ${URI}:${Tag}
               - URI: !ImportValue
                   Fn::Sub: ${ProjectName}-ECRPrometheusUri
-              Tag: !Ref ImageTag
+                Tag: !Ref ImageTag
           Essential: true
           PortMappings:
             - ContainerPort: 9090
@@ -822,12 +810,12 @@ Resources:
         - Name: grafana
           Image: !If
             - IsPlaceholder
-            - public.ecr.aws/docker/library/nginx:alpine
+            - grafana/grafana:11.4.0
             - !Sub
               - ${URI}:${Tag}
               - URI: !ImportValue
                   Fn::Sub: ${ProjectName}-ECRGrafanaUri
-              Tag: !Ref ImageTag
+                Tag: !Ref ImageTag
           Essential: true
           PortMappings:
             - ContainerPort: 3000
@@ -939,7 +927,7 @@ Resources:
               - ${URI}:${Tag}
               - URI: !ImportValue
                   Fn::Sub: ${ProjectName}-ECRPrefectWorkerUri
-              Tag: !Ref ImageTag
+                Tag: !Ref ImageTag
           Essential: true
           Environment:
             - Name: PREFECT_API_URL
