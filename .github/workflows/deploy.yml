@@ -32,7 +32,17 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      # ── Build & Push das 5 imagens customizadas ───────────────────────────
+      # ── Build & Push das 6 imagens customizadas ───────────────────────────
+
+      - name: Build & Push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.frontend
+          push: true
+          tags: |
+            ${{ vars.ECR_FRONTEND_REPO }}:${{ github.ref_name }}
+            ${{ vars.ECR_FRONTEND_REPO }}:latest
 
       - name: Build & Push platform-api
         uses: docker/build-push-action@v5
@@ -100,6 +110,8 @@ jobs:
             local FAMILY=$2
             local CONTAINER=$3
             local IMAGE=$4
+            local SIDE_CONTAINER=$5
+            local SIDE_IMAGE=$6
 
             TASK_DEF=$(aws ecs describe-task-definition \
               --task-definition "$FAMILY" \
@@ -112,6 +124,8 @@ jobs:
           for c in td['containerDefinitions']:
               if c['name'] == '$CONTAINER':
                   c['image'] = '${IMAGE}:${TAG}'
+              if '$SIDE_CONTAINER' and c['name'] == '$SIDE_CONTAINER':
+                  c['image'] = '${SIDE_IMAGE}:${TAG}'
           for key in ['taskDefinitionArn','revision','status','requiresAttributes',
                       'compatibilities','registeredAt','registeredBy']:
               td.pop(key, None)
@@ -128,12 +142,13 @@ jobs:
               --service "$SERVICE" \
               --task-definition "$NEW_ARN" \
               --force-new-deployment \
-              --output none
+              --query 'service.serviceArn' \
+              --output text > /dev/null
 
             echo "✓ $SERVICE → $NEW_ARN"
           }
 
-          update_service "platform-api"    "intelligent-maintenance-platform-api"    "platform-api"    "${ECR_BASE}/im/platform-api"
+          update_service "platform-api"    "intelligent-maintenance-platform-api"    "platform-api"    "${ECR_BASE}/im/platform-api" "frontend" "${ECR_BASE}/im/frontend"
           update_service "prefect-worker"  "intelligent-maintenance-prefect-worker"  "prefect-worker"  "${ECR_BASE}/im/prefect-worker"
           update_service "mlflow"          "intelligent-maintenance-mlflow"          "mlflow"          "${ECR_BASE}/im/mlflow"
           update_service "prometheus"      "intelligent-maintenance-prometheus"      "prometheus"      "${ECR_BASE}/im/prometheus"
@@ -157,12 +172,15 @@ jobs:
             --region ${{ vars.AWS_REGION }}
           echo "✓ prefect-worker estável"
 
+      # ── Sumário do Deploy ──────────────────────────────────────────────────
+
       - name: Deploy summary
         run: |
           echo "### Deploy concluído 🚀" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Serviço | Tag |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| frontend | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| platform-api | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| prefect-worker | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| mlflow | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY

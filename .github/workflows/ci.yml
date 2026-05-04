@@ -86,6 +86,8 @@ jobs:
       fail-fast: false
       matrix:
         image:
+          - name: frontend
+            dockerfile: Dockerfile.frontend
           - name: platform-api
             dockerfile: Dockerfile.api
           - name: prefect-worker
