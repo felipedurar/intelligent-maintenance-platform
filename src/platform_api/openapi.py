@@ -16,6 +16,10 @@ OPENAPI_TAGS = [
         "description": "Dataset and machine/process data endpoints.",
     },
     {
+        "name": "Datasets",
+        "description": "CSV upload, dataset batch metadata, and ingestion/training triggers.",
+    },
+    {
         "name": "Models",
         "description": "Model registry and active/champion model metadata.",
     },

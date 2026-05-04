@@ -5,7 +5,7 @@ from prometheus_client import make_asgi_app
 
 from platform_api.config import get_settings
 from platform_api.openapi import API_DESCRIPTION, OPENAPI_TAGS
-from platform_api.routes import chat, health, machines, models, monitoring, predictions, rag
+from platform_api.routes import chat, datasets, health, machines, models, monitoring, predictions, rag
 
 
 def create_app() -> FastAPI:
@@ -45,6 +45,7 @@ def create_app() -> FastAPI:
         tags=["Predictions"],
     )
     app.include_router(machines.router, prefix=f"{settings.api_prefix}/machines", tags=["Machines"])
+    app.include_router(datasets.router, prefix=f"{settings.api_prefix}/datasets", tags=["Datasets"])
     app.include_router(models.router, prefix=f"{settings.api_prefix}/models", tags=["Models"])
     app.include_router(rag.router, prefix=f"{settings.api_prefix}/rag", tags=["RAG"])
     app.include_router(

@@ -33,6 +33,11 @@ class Settings(BaseSettings):
         validation_alias="MLFLOW_TRACKING_URI",
     )
     drift_report_dir: str = Field(default="reports/drift", validation_alias="DRIFT_REPORT_DIR")
+    dataset_incoming_dir: str = Field(
+        default="data/incoming",
+        validation_alias="DATASET_INCOMING_DIR",
+    )
+    max_dataset_upload_mb: int = Field(default=50, validation_alias="MAX_DATASET_UPLOAD_MB")
 
 
 @lru_cache

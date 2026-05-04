@@ -194,6 +194,29 @@ Trigger the registered incoming-batch ingestion deployment:
 docker compose exec prefect-worker ./scripts/run_incoming_ingestion_deployment.sh
 ```
 
+Upload a new AI4I-compatible CSV batch through the API:
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/datasets/upload" \
+  -F "file=@data/incoming/example_batch.csv" \
+  -F "trigger_ingestion=true"
+```
+
+The upload endpoint validates the CSV schema, stores it in `data/incoming/`, records dataset
+metadata in PostgreSQL, and optionally triggers the incoming-ingestion Prefect deployment. It
+does not train or promote a model automatically.
+
+Dataset-management endpoints:
+
+```text
+POST /api/v1/datasets/upload
+GET  /api/v1/datasets/uploads
+GET  /api/v1/datasets/batches
+GET  /api/v1/datasets/batches/{batch_id}
+POST /api/v1/datasets/ingest
+POST /api/v1/datasets/retrain
+```
+
 Trigger the registered training deployment:
 
 ```bash
@@ -378,6 +401,14 @@ Both ingestion flows also export engineered snapshots to:
 ```text
 data/processed/ai4i_features_<batch_id>.csv
 data/processed/ai4i_features_latest.csv
+```
+
+The recommended operational flow for new CSV data is:
+
+```text
+upload CSV -> validate/store incoming file -> trigger ingestion -> run drift check
+-> trigger training if needed -> register candidate -> benchmark/fairness evidence
+-> human approval -> champion promotion
 ```
 
 The training pipeline reads `ai4i_machine_features` from PostgreSQL, trains a baseline

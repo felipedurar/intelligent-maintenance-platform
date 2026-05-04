@@ -33,6 +33,8 @@ services:
       QDRANT_URL: http://qdrant:6333
       RAG_COLLECTION_NAME: datathon_docs
       DRIFT_REPORT_DIR: reports/drift
+      DATASET_INCOMING_DIR: data/incoming
+      MAX_DATASET_UPLOAD_MB: 50
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,6 +44,7 @@ services:
         condition: service_started
     volumes:
       - ./src:/app/src:ro
+      - ./data:/app/data
       - ./reports:/app/reports:ro
     command: uvicorn platform_api.main:app --host 0.0.0.0 --port 8000 --reload
 

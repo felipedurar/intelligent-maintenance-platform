@@ -70,16 +70,22 @@ The platform API validates the request, applies guardrails, calls the agent orch
 
 ## Data Flow
 
-1. A Prefect ingestion flow loads the AI4I CSV or a new CSV batch.
-2. Validation checks required columns, types, missing values, duplicates, and expected ranges.
-3. Raw snapshots are versioned with DVC.
-4. Curated records are written to PostgreSQL.
-5. Feature engineering creates model-ready columns and writes a feature table.
-6. Processed datasets and reference datasets are versioned with DVC.
-7. Training reads feature tables, trains candidates, evaluates them, and logs everything to MLflow.
-8. MLflow Model Registry manages candidate/champion promotion.
-9. Model serving loads the approved model and returns failure probability, risk class, model version, and feature context.
-10. The agent uses OpenAI tool calling to request predictions, retrieve machine/model data, inspect drift, and search documentation.
+1. A user uploads a new AI4I-compatible CSV through `/api/v1/datasets/upload`, or an operator
+   places a file in `data/incoming/` during local development.
+2. The API validates the uploaded CSV, stores it in the controlled incoming folder, and records
+   dataset metadata in PostgreSQL.
+3. The API or Prefect UI submits the incoming-ingestion deployment.
+4. A Prefect ingestion flow loads the AI4I CSV or a new CSV batch.
+5. Validation checks required columns, types, missing values, duplicates, and expected ranges.
+6. Raw snapshots are versioned with DVC.
+7. Curated records are written to PostgreSQL.
+8. Feature engineering creates model-ready columns and writes a feature table.
+9. Processed datasets and reference datasets are versioned with DVC.
+10. Drift detection determines whether retraining should be recommended.
+11. Training reads feature tables, trains candidates, evaluates them, and logs everything to MLflow.
+12. MLflow Model Registry manages candidate/champion promotion.
+13. Model serving loads the approved model and returns failure probability, risk class, model version, and feature context.
+14. The agent uses OpenAI tool calling to request predictions, retrieve machine/model data, inspect drift, and search documentation.
 
 ## Ingestion And Drift
 
@@ -89,7 +95,8 @@ The initial AI4I dataset is one CSV, but the system should support future batche
 data/incoming/*.csv
 ```
 
-Prefect owns ingestion. The Platform API should not ingest CSV files during user requests.
+Prefect owns ingestion execution. The Platform API can accept a CSV upload and submit the
+Prefect deployment, but request handling does not transform, train, or promote models directly.
 
 The initial flow reads `data/raw/ai4i2020.csv`, validates the schema, stores curated rows and features in PostgreSQL, and records an ingestion batch. The incoming flow scans for unprocessed files, validates them, ingests them, and archives them after success.
 
