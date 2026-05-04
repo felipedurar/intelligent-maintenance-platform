@@ -163,7 +163,7 @@ aws cloudformation deploy \
 
 ---
 
-## 2. Preencher os Secrets na AWS
+ ## 2. Preencher os Secrets na AWS
 
 Execute o script interativo que pede cada valor e atualiza o Secrets Manager:
 
@@ -398,7 +398,70 @@ O CloudFormation calcula automaticamente o diff e aplica apenas as mudanças nec
 
 ---
 
-## 10. Referência — Recursos Criados por Stack
+## 10. Estimativa de Custo Mensal (us-east-1)
+
+> Preços de referência: Fargate `$0,04048/vCPU-hora` e `$0,004445/GB-hora` (720h/mês).  
+> Valores aproximados para ambiente rodando 24/7.
+
+### ECS Fargate — Tasks
+
+| Serviço | vCPU | Mem | Custo/mês |
+|---------|------|-----|----------|
+| `platform-api` | 0,5 | 1 GB | ~$18 |
+| `postgres` | 0,5 | 1 GB | ~$18 |
+| `prefect-server` | 0,5 | 1 GB | ~$18 |
+| `prefect-worker` | 1,0 | 2 GB | ~$36 |
+| `qdrant` | 0,5 | 1 GB | ~$18 |
+| `mlflow` | 0,25 | 0,5 GB | ~$9 |
+| `prometheus` | 0,25 | 0,5 GB | ~$9 |
+| `grafana` | 0,25 | 0,5 GB | ~$9 |
+| **Subtotal ECS** | | | **~$135/mês** |
+
+### Outros Recursos
+
+| Recurso | Detalhe | Custo/mês |
+|---------|---------|----------|
+| EFS | ~20 GB, 5 access points (`$0,30/GB`) | ~$6 |
+| S3 | ~20 GB total (`$0,023/GB`) | ~$0,50 |
+| ECR | ~5 GB de imagens (`$0,10/GB`) | ~$0,50 |
+| Secrets Manager | 5 secrets (`$0,40/secret`) | ~$2 |
+| CloudWatch Logs | 8 grupos, retenção 14 dias | ~$5 |
+| Cloud Map | 5 serviços DNS (`$0,10k/queries`) | ~$1 |
+| Internet Gateway | Transferência de dados saída | ~$1 |
+| Tailscale | Plano free (até 3 usuários / 100 devices) | **$0** |
+| GitHub Actions | 2.000 min/mês gratuitos (público) | **$0** |
+| **Subtotal outros** | | **~$16/mês** |
+
+### Total Estimado
+
+| Cenário | Custo/mês |
+|---------|----------|
+| **Todos os serviços 24/7** | **~$151/mês** |
+| Economia: parar `prometheus` + `grafana` fora do horário comercial (12h/dia) | ~$127/mês |
+| Economia: parar todos os serviços privados à noite (8h/dia útil apenas) | ~$70/mês |
+
+### Como parar serviços para economizar
+
+```bash
+# Parar um serviço (zera o DesiredCount)
+aws ecs update-service \
+  --cluster intelligent-maintenance-cluster \
+  --service prometheus \
+  --desired-count 0
+
+# Religar
+aws ecs update-service \
+  --cluster intelligent-maintenance-cluster \
+  --service prometheus \
+  --desired-count 1
+```
+
+> **Atenção:** parar `postgres` apaga as conexões ativas mas os dados persistem no EFS.  
+> Parar `prefect-server` interrompe o agendamento de flows.
+
+---
+
+## 11. Referência — Recursos Criados por Stack
 
 ### Stack 01-network
 - VPC `10.0.0.0/16` com 2 subnets públicas (AZ-a e AZ-b)

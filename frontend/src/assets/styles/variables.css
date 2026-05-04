@@ -1,0 +1,58 @@
+:root {
+  /* Colors - Industrial Tech / Slate & Zinc */
+  --bg-primary: #020617; /* Slate-950 */
+  --bg-secondary: #0f172a; /* Slate-900 */
+  --bg-tertiary: #1e293b; /* Slate-800 */
+  
+  --surface: #18181b; /* Zinc-900 */
+  --surface-hover: #27272a; /* Zinc-800 */
+  
+  --text-primary: #f8fafc; /* Slate-50 */
+  --text-secondary: #94a3b8; /* Slate-400 */
+  --text-muted: #64748b; /* Slate-500 */
+  
+  --brand-primary: #2563eb; /* Blue-600 */
+  --brand-secondary: #4f46e5; /* Indigo-600 */
+  
+  /* Status Colors */
+  --status-critical: #ef4444; /* Red-500 */
+  --status-warning: #f59e0b; /* Amber-500 */
+  --status-normal: #10b981; /* Emerald-500 */
+  --status-info: #3b82f6; /* Blue-500 */
+
+  /* Borders & Dividers */
+  --border-color: #334155; /* Slate-700 */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}

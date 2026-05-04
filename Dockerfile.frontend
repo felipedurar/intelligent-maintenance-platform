@@ -1,0 +1,18 @@
+FROM node:20-slim
+
+WORKDIR /app
+
+# Copy package files
+COPY frontend/package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy the rest of the code
+COPY frontend/ .
+
+# Expose Vite's default port
+EXPOSE 5173
+
+# Run in development mode
+CMD ["npm", "run", "dev", "--", "--host"]
