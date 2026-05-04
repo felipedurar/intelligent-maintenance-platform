@@ -128,6 +128,16 @@ Resources:
         - Key: Name
           Value: !Sub ${ProjectName}-sg-private
 
+  # Regra: SG-Public recebe tráfego HTTP (porta 80) da internet
+  SGPublicIngressPort80:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SGPublic
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+
   # Regra: SG-Private recebe todo tráfego de SG-Public
   SGPrivateIngressFromPublic:
     Type: AWS::EC2::SecurityGroupIngress

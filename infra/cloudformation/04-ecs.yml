@@ -287,8 +287,8 @@ Resources:
       Family: !Sub ${ProjectName}-platform-api
       NetworkMode: awsvpc
       RequiresCompatibilities: [FARGATE]
-      Cpu: "512"
-      Memory: "1024"
+      Cpu: "1024"
+      Memory: "2048"
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt PlatformAPITaskRole.Arn
       Volumes:
@@ -302,15 +302,38 @@ Resources:
                 Fn::Sub: ${ProjectName}-EFSAPReportsId
               IAM: ENABLED
       ContainerDefinitions:
-        - Name: platform-api
+        - Name: frontend
           Image: !If
             - IsPlaceholder
             - public.ecr.aws/docker/library/nginx:alpine
             - !Sub
               - ${URI}:${Tag}
               - URI: !ImportValue
+                  Fn::Sub: ${ProjectName}-ECRFrontendUri
+                Tag: !Ref ImageTag
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/im/platform-api
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: frontend
+        - Name: platform-api
+          Image: !If
+            - IsPlaceholder
+            - public.ecr.aws/docker/library/python:3.12-slim
+            - !Sub
+              - ${URI}:${Tag}
+              - URI: !ImportValue
                   Fn::Sub: ${ProjectName}-ECRPlatformAPIUri
                 Tag: !Ref ImageTag
+          Command: !If
+            - IsPlaceholder
+            - ["python", "-m", "http.server", "8000"]
+            - !Ref AWS::NoValue
           Essential: true
           PortMappings:
             - ContainerPort: 8000
