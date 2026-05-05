@@ -1,156 +1,187 @@
-# System Card
+# Ficha do Sistema
 
-## System Overview
+Este documento descreve a plataforma como sistema completo, não apenas como modelo isolado.
 
-The Datathon AI Platform is a predictive-maintenance decision-support system for industrial
-machines. It uses the AI4I 2020 Predictive Maintenance Dataset to estimate machine-failure
-risk, explain relevant model signals, monitor drift, and answer project questions through an
-OpenAI-powered assistant with RAG over project documentation.
+O objetivo é deixar claro o que o sistema faz, para quem ele serve, quais controles já existem e quais limitações ainda permanecem.
 
-This system is a Datathon prototype. It is designed to demonstrate MLOps, LLMOps, governance,
-monitoring, and security controls. It is not approved for autonomous industrial control.
+## Visão Geral
 
-## Intended Users
+A plataforma é um sistema de apoio à decisão para manutenção preditiva em máquinas industriais.
 
-- Maintenance analysts reviewing machine-failure risk.
-- Data scientists comparing model candidates and evaluation reports.
-- MLOps engineers operating ingestion, training, promotion, monitoring, and deployment flows.
-- Datathon evaluators reviewing architecture, safety, and governance evidence.
+Ela combina:
 
-## Intended Use
+- um modelo de predição de falha;
+- uma API para serving;
+- pipelines de ingestão e treinamento;
+- governança de modelos no MLflow;
+- monitoramento;
+- um assistente com LLM e RAG sobre a própria documentação.
 
-- Predict failure probability for one machine observation.
-- Explain model and feature behavior in operational language.
-- Retrieve architecture, model, security, LGPD, and deployment documentation through RAG.
-- Monitor operational metrics and PSI-based feature drift.
-- Govern model promotion through MLflow candidate/champion aliases and human approval.
+O projeto foi estruturado para demonstrar capacidades de MLOps, LLMOps, segurança e governança em um contexto de Datathon.
 
-## Non-Use
+## Usuários Esperados
 
-- Do not use the system to automatically stop or restart industrial equipment.
-- Do not use the system as the only source of maintenance decisions.
-- Do not use the assistant for medical, legal, financial, phishing, malware, or unrelated tasks.
-- Do not treat AI4I results as validated performance for a real factory without local data
-  validation, calibration, and safety review.
+Os principais perfis de uso são:
 
-## Components
+- analistas de manutenção interessados no risco de falha;
+- cientistas de dados comparando modelos e relatórios;
+- engenheiros de MLOps operando ingestão, treinamento e promoção;
+- avaliadores do Datathon analisando arquitetura, segurança e governança.
 
-| Component | Purpose | Runtime |
-|---|---|---|
-| FastAPI Platform API | Chat, prediction, RAG search, model metadata, monitoring routes | `Dockerfile.api` |
-| Prefect Worker | Ingestion, feature build, training, RAG indexing, drift, evaluation jobs | `Dockerfile.worker` |
-| PostgreSQL | Curated raw records, feature tables, Prefect metadata, MLflow metadata | Docker Compose / AWS |
-| MLflow | Experiment tracking, model artifacts, registry aliases | `Dockerfile.mlflow` |
-| Qdrant | Vector database for documentation retrieval | Docker Compose / cloud service |
-| OpenAI API | LLM chat, tool calling, embeddings | Managed API |
-| Prometheus | API and custom metric scraping | Docker Compose / cloud |
-| Grafana | Observability dashboard | Docker Compose / cloud |
+## Uso Pretendido
 
-## API Surface
+O sistema foi desenhado para:
 
-Primary routes:
+- estimar risco de falha para uma observação de máquina;
+- documentar e explicar a solução;
+- apoiar perguntas em linguagem natural sobre o projeto;
+- monitorar métricas e drift;
+- manter um fluxo auditável de promoção de modelos.
 
-- `GET /api/v1/health`
-- `GET /api/v1/ready`
-- `POST /api/v1/chat`
-- `POST /api/v1/predictions`
-- `GET /api/v1/models/{model_name}/active`
-- `POST /api/v1/rag/search`
-- `GET /api/v1/monitoring/status`
-- `GET /metrics`
+## Uso Não Pretendido
 
-OpenAPI documentation is exposed at `/api/v1/docs`.
+O sistema não foi desenhado para:
 
-## Agent Tools
+- controlar máquinas diretamente;
+- disparar ações automáticas de manutenção;
+- operar fora do domínio de manutenção preditiva;
+- servir como única fonte de decisão operacional;
+- substituir validação humana em ambiente industrial real.
 
-The assistant uses OpenAI tool calling with a constrained tool set:
+## Componentes do Sistema
 
-- `search_project_docs`: retrieves relevant chunks from project and governance docs.
-- `get_active_model`: checks MLflow champion metadata.
-- `predict_machine_failure`: calls the model-serving path for a machine observation.
+### Camada online
 
-The agent is scoped to predictive maintenance, the AI4I dataset, model operations, RAG,
-monitoring, deployment, and governance.
+- `platform_api`: predição, chat, busca RAG, datasets, monitoramento e metadados;
+- frontend: camada de consumo para demonstração e interação.
 
-## Model Lifecycle
+### Camada offline
 
-The lifecycle is:
+- `prefect-worker`: ingestão, treinamento, drift, indexação RAG, avaliações.
+
+### Serviços de suporte
+
+- PostgreSQL;
+- MLflow;
+- Qdrant;
+- Prometheus;
+- Grafana;
+- OpenAI.
+
+## Superfície de API
+
+Rotas principais expostas hoje:
 
 ```text
-CSV/DVC data -> ingestion -> feature engineering -> training -> MLflow candidate
--> benchmark/fairness evidence -> human approval -> champion alias -> serving
+GET  /api/v1/health
+GET  /api/v1/ready
+POST /api/v1/chat
+POST /api/v1/predictions
+GET  /api/v1/machines/dataset/status
+POST /api/v1/datasets/upload
+GET  /api/v1/datasets/uploads
+GET  /api/v1/datasets/batches
+GET  /api/v1/datasets/batches/{batch_id}
+POST /api/v1/datasets/ingest
+POST /api/v1/datasets/retrain
+GET  /api/v1/models/{model_name}/active
+POST /api/v1/rag/search
+GET  /api/v1/monitoring/status
+GET  /metrics
 ```
 
-Training registers the best model as `candidate` with `approval_status=pending`. Production
-serving only loads the MLflow `champion` alias. Promotion requires an explicit reviewer and
-reason through `scripts/promote_model.sh`.
+Documentação interativa:
 
-Rollback is supported by preserving the previous production version as the
-`previous_champion` alias.
+```text
+/api/v1/docs
+```
 
-## Monitoring
+## Ferramentas do Agente
 
-Operational monitoring:
+O agente usa tool calling com escopo limitado. As ferramentas principais são:
 
-- Prometheus metrics exposed by FastAPI at `/metrics`.
-- Grafana dashboard for API latency, prediction volume, chat latency, error counters, and
-  guardrail events.
+- busca de documentação do projeto;
+- consulta ao modelo ativo no MLflow;
+- predição de risco de falha.
 
-Model and data monitoring:
+Esse recorte é intencional. O agente não possui ferramentas para alterar infraestrutura, promover modelos, gravar dados arbitrários ou executar automações perigosas.
 
-- PSI-based drift reports in `reports/drift/`.
-- Drift summaries exposed through `/api/v1/monitoring/status`.
-- Benchmark report in `evaluation/reports/model_benchmark_latest.md`.
-- Explainability/fairness report in `evaluation/reports/explainability_fairness_latest.md`.
+## Ciclo de Vida do Modelo
 
-LLM and agent evaluation:
+O fluxo atual do sistema é:
 
-- Golden set: `data/golden_set/agent_eval.jsonl`.
-- Agent evaluation script: `evaluation/agent_eval.py`.
-- Optional RAGAS and LLM-as-judge paths are implemented, but must be run with the required
-  optional dependencies and OpenAI key to produce final scored evidence.
+```text
+dataset bruto -> ingestão -> features -> treinamento -> candidate
+-> benchmark e fairness -> aprovação humana -> champion -> serving
+```
 
-## Security Controls
+Isso significa que o modelo em produção depende de um gate explícito de governança. O pipeline pode sugerir o melhor candidato, mas não faz a promoção sozinho.
 
-- Input guardrails block prompt injection, secret extraction, unsafe topics, and off-topic
-  requests.
-- Output guardrails redact token-like secrets, database URLs, internal prompt leakage, and
-  unsafe automation claims.
-- Tool schemas constrain model-tool inputs.
-- Security tests are stored in `data/golden_set/security_eval.jsonl`.
-- Latest security report: `evaluation/reports/security_eval_latest.json`.
-- Latest security result: 5/5 scenarios passed on 2026-05-03.
+## Monitoramento
 
-## Human Oversight
+O sistema possui duas camadas principais de monitoramento.
 
-Human review is required for:
+### Monitoramento operacional
 
-- Champion model promotion.
-- Interpreting failure-risk predictions.
-- Any maintenance action or operational intervention.
-- Production readiness decisions for real industrial deployment.
+- métricas Prometheus em `/metrics`;
+- dashboards no Grafana;
+- contadores de chat, predição, latência, RAG e guardrails.
 
-The platform explicitly positions model output as decision support, not an automated
-maintenance command.
+### Monitoramento de dados e modelo
 
-## Known Limitations
+- drift baseado em PSI;
+- relatórios em `reports/drift/`;
+- benchmark e fairness como evidência de qualidade;
+- rastreabilidade de versão no MLflow.
 
-- AI4I is synthetic and may not represent a real plant, machine fleet, or sensor profile.
-- RAG quality depends on indexed project documentation and golden-set coverage.
-- OpenAI is a managed service dependency. The application does not control model quantization.
-- Authentication and RBAC are documented for cloud deployment but are not fully enforced in the
-  local Docker Compose prototype.
-- Real production use would require industrial validation, threshold calibration, SRE runbooks,
-  incident response ownership, and environment-specific access policies.
+## Segurança
 
-## Evidence
+O sistema já possui controles concretos para o chat e para a superfície LLM.
 
-- Architecture: `docs/architecture.md`
-- Stack: `docs/stack.md`
-- Model card: `docs_governance/MODEL_CARD.md`
-- LGPD plan: `docs_governance/LGPD_PLAN.md`
-- OWASP mapping: `docs_governance/OWASP_MAPPING.md`
-- Red-team report: `docs_governance/RED_TEAM_REPORT.md`
-- Benchmark: `evaluation/reports/model_benchmark_latest.md`
-- Explainability/fairness: `evaluation/reports/explainability_fairness_latest.md`
-- Security evaluation: `evaluation/reports/security_eval_latest.json`
+### Guardrails de entrada
+
+- bloqueio de prompt injection;
+- bloqueio de tentativas de extração de segredos;
+- restrição de tópico.
+
+### Guardrails de saída
+
+- sanitização de chaves e tokens;
+- remoção de credenciais em URLs;
+- bloqueio de vazamento de prompt interno;
+- mitigação de afirmações indevidas de automação.
+
+### Evidências
+
+- conjunto de testes adversariais;
+- avaliação de segurança reproduzível;
+- mapeamento OWASP;
+- relatório de red team.
+
+## Supervisão Humana
+
+O sistema depende de supervisão humana em pontos críticos:
+
+- interpretação de risco de falha;
+- decisão final de manutenção;
+- promoção de modelo;
+- aceitação de artefatos de benchmark e fairness;
+- validação de uso em contexto real.
+
+Isso não é uma limitação acidental. É uma decisão de desenho.
+
+## Limitações Atuais
+
+As principais limitações do sistema hoje são:
+
+- base de modelagem sintética;
+- dependência de um LLM gerenciado externo;
+- autenticação e RBAC ainda mais fortes na arquitetura de cloud do que no ambiente local;
+- qualidade do RAG dependente da qualidade da documentação indexada;
+- ausência de validação industrial em dados reais.
+
+## Conclusão
+
+Como sistema, a plataforma já é mais do que uma API de predição isolada. Ela combina modelo, operação, documentação, observabilidade, avaliação e governança.
+
+Ao mesmo tempo, o projeto deixa claro seu posicionamento: trata-se de um sistema de apoio à decisão e de demonstração técnica madura, não de automação industrial autônoma.

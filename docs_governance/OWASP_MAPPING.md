@@ -1,70 +1,214 @@
-# OWASP Mapping
+# Mapeamento OWASP para LLMs
 
-This document maps relevant OWASP Top 10 for LLM Applications risks to the Datathon AI
-Platform. It focuses on implemented controls, available evidence, and residual production risk.
+Este documento relaciona riscos relevantes do OWASP Top 10 para aplicações com LLM ao estado atual da plataforma.
 
-## Summary
+O foco aqui não é dizer que todos os riscos estão “resolvidos”. A ideia é mostrar, com honestidade, o que já foi implementado, o que já possui evidência e o que ainda depende de evolução para um cenário real de produção.
 
-| OWASP risk | Relevance | Current status |
-|---|---|---|
-| Prompt Injection | High | Guardrails and tests implemented |
-| Sensitive Information Disclosure | High | Output sanitization and secret blocking implemented |
-| Insecure Output Handling | Medium | Sanitization and domain constraints implemented |
-| Excessive Agency | High | Tool scope and decision-support wording implemented |
-| Insecure Plugin/Tool Use | Medium | Strict tool schemas and limited tool set implemented |
-| Data and Vector Store Poisoning | Medium | Controlled RAG source set implemented |
-| Supply Chain and Model Integrity | High | MLflow registry and approval gate implemented |
-| Model Denial of Service | Medium | Basic input scope and length controls, production hardening pending |
+## Resumo Executivo
 
-## Detailed Mapping
-
-| Risk | How it appears in this project | Potential impact | Implemented mitigation | Evidence |
-|---|---|---|---|---|
-| Prompt Injection | User asks the assistant to ignore instructions, reveal hidden prompts, or bypass safety controls. | Secret leakage, unsafe tool calls, unreliable answers. | Regex-based prompt-injection detection blocks override and exfiltration patterns before the LLM is called. | `src/security/guardrails.py`, `data/golden_set/security_eval.jsonl`, `evaluation/reports/security_eval_latest.json` |
-| Sensitive Information Disclosure | User asks for OpenAI keys, database passwords, internal prompts, or config values. | Credential compromise, internal-control exposure. | Input blocking for secret extraction attempts and output redaction for API keys, JWT-like tokens, database URLs, and password/token fields. | `src/security/guardrails.py`, security eval cases `sec-001`, `sec-002` |
-| Insecure Output Handling | LLM output may claim the platform automatically stops machines or expose unsafe operational instructions. | Over-trust, unsafe maintenance action, misleading automation claims. | Output sanitizer rewrites unsafe automation claims and system prompt leakage. System prompt frames the model as decision support only. | `src/security/guardrails.py`, `src/agent/orchestrator.py`, `docs_governance/SYSTEM_CARD.md` |
-| Excessive Agency | Agent can call prediction and metadata tools, which may be mistaken for operational authority. | Users may treat model output as a maintenance command. | Tool set is limited to documentation search, model metadata, and prediction. The assistant does not trigger maintenance actions. | `src/agent/orchestrator.py`, `docs_governance/SYSTEM_CARD.md` |
-| Insecure Plugin/Tool Use | LLM tool calls could pass invalid or malicious parameters. | Invalid predictions, unexpected tool execution. | OpenAI tool schemas define required fields and enums. FastAPI prediction schemas validate request payloads. | `src/agent/orchestrator.py`, `src/platform_api/routes/predictions.py`, `tests/test_platform_api.py` |
-| Data and Vector Store Poisoning | Malicious or low-quality documents could be indexed into RAG. | Grounded answers may cite poisoned context. | RAG indexing is controlled by project-owned documentation paths, not arbitrary user upload. Indexing is run by worker scripts, not public chat requests. | `src/rag/indexer.py`, `scripts/run_rag_indexing.sh`, `docs/architecture.md` |
-| Supply Chain and Model Integrity | A model version could be promoted without review or lineage. | Wrong model in production, weak auditability. | MLflow tracks runs and artifacts. Training registers `candidate`; `promote_model.py` requires benchmark/fairness reports, approver, reason, and pending status before assigning `champion`. | `src/training/train_model.py`, `src/training/promote_model.py`, `tests/test_model_promotion.py` |
-| Model Denial of Service | Large or unrelated prompts could consume model/tool resources. | Cost increase, latency, degraded service. | Topic restriction blocks unrelated requests. Guardrails constrain prompt scope. Production should add API rate limiting and authentication. | `src/security/guardrails.py`, `evaluation/reports/security_eval_latest.json` |
-
-## Security Evaluation Evidence
-
-Latest deterministic security evaluation:
-
-- File: `evaluation/reports/security_eval_latest.json`
-- Generated at: 2026-05-03
-- Samples: 5
-- Pass rate: 1.0
-
-Covered scenarios:
+Os riscos mais relevantes para o projeto hoje são:
 
 - prompt injection;
-- system prompt extraction;
-- secret extraction;
-- off-topic malicious request;
-- off-topic harmless request;
-- allowed predictive-maintenance request.
+- exposição de informação sensível;
+- uso indevido de ferramentas do agente;
+- envenenamento de contexto no RAG;
+- promoção inadequada de modelos;
+- abuso de consumo da camada de LLM.
 
-## Residual Risks
+## Mapeamento
 
-- Regex guardrails are useful for a Datathon prototype but are not a complete LLM firewall.
-- Production should add authenticated access, rate limits, centralized audit logs, WAF/API
-  gateway policies, and environment-specific secret management.
-- RAG poisoning controls depend on keeping indexing restricted to trusted repositories and
-  approved document sources.
-- OpenAI managed serving reduces infrastructure burden but introduces external provider
-  dependency and requires vendor/security review for production.
+### Prompt Injection
 
-## Required Production Hardening
+**Como aparece no projeto**
 
-Before real production use:
+O usuário pode tentar convencer o agente a ignorar instruções, revelar prompt interno ou contornar regras de uso.
 
-1. enforce API authentication and RBAC;
-2. add rate limiting per API key/user;
-3. add centralized security logs and alerting;
-4. require reviewed pull requests for RAG source changes;
-5. enforce cloud secret manager usage;
-6. add dependency scanning and container vulnerability scanning;
-7. run recurring red-team evaluation after prompt, tool, or RAG changes.
+**Impacto**
+
+- respostas não confiáveis;
+- vazamento de contexto interno;
+- chamadas indevidas de ferramentas.
+
+**Mitigações atuais**
+
+- detecção de padrões de prompt injection na entrada;
+- bloqueio antes da chamada ao LLM;
+- conjunto de avaliação adversarial.
+
+**Evidências**
+
+- `src/security/guardrails.py`
+- `data/golden_set/security_eval.jsonl`
+- `evaluation/reports/security_eval_latest.json`
+
+### Exposição de informação sensível
+
+**Como aparece no projeto**
+
+Tentativas de solicitar chave da OpenAI, senhas de banco, prompts internos ou credenciais.
+
+**Impacto**
+
+- comprometimento de segredos;
+- vazamento de detalhes internos da plataforma.
+
+**Mitigações atuais**
+
+- bloqueio de pedidos explícitos de segredos;
+- sanitização de tokens e credenciais na saída;
+- recomendação de uso de secrets fora do código.
+
+**Evidências**
+
+- `src/security/guardrails.py`
+- cenários de segurança já implementados
+
+### Insecure Output Handling
+
+**Como aparece no projeto**
+
+O agente pode produzir uma resposta que sugira automação indevida, excesso de confiança ou instruções inadequadas.
+
+**Impacto**
+
+- usuário interpretar a resposta como comando operacional;
+- uso indevido do sistema em contexto industrial.
+
+**Mitigações atuais**
+
+- sanitização de saída;
+- framing do sistema como apoio à decisão;
+- documentação explícita em model card e system card.
+
+### Excessive Agency
+
+**Como aparece no projeto**
+
+Um agente com ferramentas pode ser confundido com um sistema de execução operacional.
+
+**Impacto**
+
+- sobrecarga de confiança;
+- interpretação errada do escopo do assistente.
+
+**Mitigações atuais**
+
+- conjunto de ferramentas limitado;
+- ausência de ferramentas destrutivas ou operacionais;
+- promoção de modelo fora do escopo do agente.
+
+### Insecure Tool Use
+
+**Como aparece no projeto**
+
+Chamadas com payload inválido ou inadequado para as ferramentas do agente.
+
+**Impacto**
+
+- resultados incorretos;
+- comportamento fora do esperado;
+- uso frágil da API.
+
+**Mitigações atuais**
+
+- schemas explícitos para requests;
+- validação com Pydantic na API;
+- ferramentas do agente com escopo conhecido.
+
+### Data and Vector Store Poisoning
+
+**Como aparece no projeto**
+
+O RAG pode ser afetado se documentos maliciosos ou incorretos forem indexados.
+
+**Impacto**
+
+- respostas documentais enviesadas;
+- grounding ruim;
+- confiança excessiva em contexto contaminado.
+
+**Mitigações atuais**
+
+- indexação restrita a documentos do próprio projeto;
+- indexação via worker e scripts controlados;
+- ausência de upload aberto de documentação arbitrária para o RAG.
+
+### Supply Chain e Integridade do Modelo
+
+**Como aparece no projeto**
+
+Um modelo pode ser colocado em produção sem revisão suficiente.
+
+**Impacto**
+
+- champion ruim em produção;
+- perda de rastreabilidade;
+- fragilidade de governança.
+
+**Mitigações atuais**
+
+- MLflow como registry;
+- alias `candidate` e `champion`;
+- aprovação manual;
+- necessidade de benchmark e fairness antes da promoção.
+
+### Model Denial of Service
+
+**Como aparece no projeto**
+
+Prompts grandes, off-topic ou abusivos podem consumir recursos desnecessários do LLM e das ferramentas.
+
+**Impacto**
+
+- custo;
+- latência;
+- degradação de serviço.
+
+**Mitigações atuais**
+
+- restrição de tópico;
+- guardrails de entrada;
+- separação entre API online e worker offline.
+
+**Controles ainda recomendados**
+
+- autenticação;
+- rate limiting;
+- quotas por usuário ou chave.
+
+## Evidências Atuais
+
+O projeto já possui evidências concretas, e não apenas intenção documental:
+
+- testes de segurança;
+- relatório de avaliação determinística;
+- guardrails implementados;
+- governança de promoção;
+- documentação de limites do sistema.
+
+## Riscos Residuais
+
+Mesmo com os controles atuais, ainda existem riscos residuais relevantes:
+
+- ataques mais sofisticados de prompt injection podem escapar de regras determinísticas;
+- o RAG depende de disciplina sobre quais documentos entram no índice;
+- o ambiente local ainda não representa um hardening completo de produção;
+- o uso de um LLM gerenciado traz dependências externas de fornecedor.
+
+## Recomendações para Produção
+
+Antes de tratar a solução como ambiente real de produção, o ideal é acrescentar:
+
+1. autenticação forte na API;
+2. RBAC por função;
+3. rate limiting;
+4. logs centralizados de segurança;
+5. revisão obrigatória de mudanças em documentos indexados no RAG;
+6. varredura de dependências e imagens;
+7. avaliações recorrentes após mudanças em prompts, ferramentas ou contexto documental.
+
+## Conclusão
+
+O projeto já trata com seriedade os riscos mais comuns de aplicações com LLM, especialmente no que diz respeito a prompt injection, segredos, escopo do agente e governança de modelos.
+
+Ainda assim, os controles atuais devem ser vistos como uma base sólida para o Datathon, não como ponto final de segurança para produção corporativa.

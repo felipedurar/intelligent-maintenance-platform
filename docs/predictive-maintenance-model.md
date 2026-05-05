@@ -1,36 +1,38 @@
-# Predictive Maintenance Model
+# Modelo de Manutenção Preditiva
 
-This document defines the model and feature direction for the AI4I 2020 predictive-maintenance use case.
+Este documento descreve o problema de modelagem, as features, os modelos treinados, os critérios de avaliação e a forma como o modelo entra em produção na plataforma.
 
-## Task
+## Problema
 
-Primary task:
+O objetivo do modelo é prever a variável:
 
 ```text
-Predict Machine failure as a binary classification problem.
+Machine failure
 ```
 
-Model output:
+Em outras palavras, o modelo estima a probabilidade de falha da máquina a partir das variáveis de processo observadas em um determinado ponto.
 
-- failure probability
-- risk class such as `low`, `medium`, `high`
-- model version
-- feature version
-- optional explanation/top contributing features
+Trata-se de um problema de classificação binária:
 
-Failure-mode labels:
+- `0`: sem falha;
+- `1`: com falha.
 
-- `TWF`
-- `HDF`
-- `PWF`
-- `OSF`
-- `RNF`
+## O que o modelo retorna
 
-These labels can support diagnostics and evaluation slices, but they should not be used as input features for the primary failure classifier because they directly encode post-outcome failure information.
+Na plataforma, a inferência não retorna apenas um rótulo seco. A API entrega:
 
-## Raw Columns
+- probabilidade de falha;
+- classe de risco;
+- versão do modelo;
+- metadados úteis para auditoria.
 
-Expected input columns:
+Isso faz mais sentido do ponto de vista operacional, porque manutenção preditiva raramente depende só de um sim ou não. A probabilidade e a faixa de risco ajudam mais na priorização.
+
+## Dataset Utilizado
+
+O projeto usa o **AI4I 2020 Predictive Maintenance Dataset**.
+
+Colunas principais:
 
 - `UDI`
 - `Product ID`
@@ -47,136 +49,192 @@ Expected input columns:
 - `OSF`
 - `RNF`
 
-## Feature Engineering
+O alvo principal do modelo é `Machine failure`.
 
-Recommended feature columns:
+As colunas `TWF`, `HDF`, `PWF`, `OSF` e `RNF` são úteis para análise de falhas, entendimento do dataset e possíveis estudos diagnósticos, mas não devem ser usadas como features do classificador principal, porque carregam informação muito próxima do desfecho.
 
-- `type_encoded` or one-hot encoded product type.
-- `air_temperature_k`.
-- `process_temperature_k`.
-- `temperature_delta_k = process_temperature_k - air_temperature_k`.
-- `rotational_speed_rpm`.
-- `torque_nm`.
-- `tool_wear_min`.
-- `rotational_speed_rad_s`.
-- `power_w = torque_nm * rotational_speed_rad_s`.
-- `torque_speed_interaction`.
-- `tool_wear_by_torque`.
-- `temperature_delta_low_flag`.
-- `power_low_flag`.
-- `power_high_flag`.
-- `overstrain_margin`, using product-type thresholds.
+## Entradas da API de Predição
 
-Known physics-inspired conditions from the dataset description can be useful as engineered features:
+Hoje a API de predição recebe uma observação estruturada com:
 
-- Heat dissipation risk: low temperature delta and low rotational speed.
-- Power failure risk: power outside expected operating range.
-- Overstrain risk: tool wear multiplied by torque relative to product-type threshold.
+- `product_type`
+- `air_temperature_k`
+- `process_temperature_k`
+- `rotational_speed_rpm`
+- `torque_nm`
+- `tool_wear_min`
 
-## Baseline And Challenger Models
+Esses campos são suficientes para a plataforma reconstruir a engenharia de features usada no treinamento e servir a inferência com consistência.
 
-Recommended baseline:
+## Engenharia de Features
 
-- Logistic Regression with class weighting.
+O projeto não usa apenas os dados crus. Durante a ingestão e no serving, a plataforma deriva variáveis adicionais para representar melhor o comportamento físico do processo.
 
-Recommended challengers:
+Exemplos importantes:
 
-- Random Forest.
-- Gradient Boosting, XGBoost, or LightGBM if dependencies are acceptable.
-- Optional PyTorch MLP for Datathon PyTorch demonstration.
+- delta de temperatura entre processo e ar;
+- velocidade angular derivada da rotação;
+- potência estimada a partir de torque e rotação;
+- interações entre torque e velocidade;
+- interações entre desgaste e torque;
+- indicadores de risco ligados às condições descritas no próprio AI4I.
 
-Because the dataset is tabular and relatively small, tree-based models may outperform a neural network and are easier to explain.
+Essa decisão faz bastante sentido porque o dataset já sugere relações físicas claras entre falha, dissipação térmica, esforço e potência.
 
-## Metrics
+## Modelos da Plataforma
 
-Use classification metrics that handle imbalance:
+Atualmente, a plataforma trabalha com múltiplos candidatos.
 
-- ROC AUC.
-- PR AUC.
-- F1.
-- Recall for the failure class.
-- Precision for the failure class.
-- Confusion matrix.
+### Baseline
 
-In predictive maintenance, recall is often important because missing an actual failure can be expensive. Precision still matters because too many false alarms can waste maintenance resources.
+- regressão logística balanceada.
 
-## MLflow Logging Contract
+Ela serve como referência simples, rápida e interpretável.
 
-Training should log:
+### Challengers
 
-- model name.
-- model type.
-- dataset version.
-- feature version.
-- git SHA.
-- random seed.
-- train/test split strategy.
-- class balance.
-- feature list.
-- hyperparameters.
-- ROC AUC.
-- PR AUC.
-- F1.
-- precision.
-- recall.
-- confusion matrix artifact.
-- feature importance or explanation artifact when available.
-- Evidently drift reference artifact.
+- random forest balanceado;
+- extra trees no benchmark;
+- MLP em PyTorch como challenger neural, quando disponível no runtime de treinamento.
 
-Current implementation:
+Isso permite comparar:
 
-- baseline: class-balanced logistic regression with standard scaling.
-- challenger: class-balanced random forest.
-- deep challenger: PyTorch MLP with standardized tabular inputs, class-imbalance weighting, dropout, and early stopping when PyTorch is available in the training runtime.
-- selection metric: average precision first, then recall and F1 as tie-breakers.
-- registry name: `ai4i-machine-failure-classifier`.
-- training alias: `candidate`.
-- serving alias: `champion`.
-- serving flavor: MLflow pyfunc wrapper returning `failure_probability`, so sklearn and PyTorch candidates share the same production serving contract.
+- um modelo linear;
+- modelos baseados em árvores;
+- um modelo neural tabular.
 
-Required tags:
+## Critério de Seleção
 
-- `model_name`
-- `model_type`
-- `owner`
-- `risk_level`
-- `approval_status`
-- `training_data_version`
-- `feature_version`
-- `git_sha`
+Como a classe de falha é desbalanceada, o projeto prioriza métricas mais adequadas para esse tipo de cenário.
 
-## Serving Contract
+A ordenação principal dos candidatos é feita por:
 
-Serving should:
+1. `average_precision`
+2. `recall`
+3. `f1`
 
-1. Load only approved/champion model versions from MLflow.
-2. Load preprocessing artifacts and the model from cloud object storage through MLflow.
-3. Validate incoming feature payloads.
-4. Apply the same feature transformations used during training.
-5. Return failure probability, risk class, model version, feature version, and explanation metadata.
-6. Emit metrics for latency, errors, prediction counts, model version, and risk-class distribution.
+Essa escolha foi feita porque, em manutenção preditiva, deixar passar uma falha real costuma ser mais caro do que investigar alguns falsos positivos adicionais.
 
-## Promotion Gate
+## Métricas Avaliadas
 
-Training and production promotion are intentionally separate:
+Entre as métricas usadas no treinamento e benchmark estão:
 
-1. The training flow registers the best model version and points the MLflow `candidate` alias to it.
-2. The candidate version must have `approval_status=pending` and `validation_status=passed`.
-3. Benchmark and explainability/fairness reports must exist and have `status=ok`.
-4. A human reviewer runs `scripts/promote_model.sh` with `--approved-by` and `--reason`.
-5. The promotion command tags the model version with `approval_status=approved`,
-   `approved_by`, `approved_at`, and `promotion_reason`.
-6. The previous production version is preserved with the `previous_champion` alias before
-   the new version receives the `champion` alias.
+- ROC AUC;
+- average precision;
+- precisão;
+- recall;
+- F1;
+- matriz de confusão.
 
-## Drift Contract
+Essas métricas são registradas no MLflow e reaproveitadas nos artefatos de benchmark e governança.
 
-Evidently jobs should compare reference data against current batches for:
+## Benchmark
 
-- raw feature drift.
-- engineered feature drift.
-- prediction drift.
-- target drift when labels are available.
-- performance drift when labels are available.
+O projeto gera um benchmark comparando os candidatos do pipeline.
 
-The initial static dataset can be split into reference and current/holdout slices to demonstrate drift reports. Future CSV batches should be ingested through `data/incoming/` or cloud object storage and compared against the approved reference dataset.
+Esse benchmark serve para:
+
+- justificar a escolha do melhor modelo;
+- comparar frameworks diferentes;
+- documentar custo-benefício entre desempenho e complexidade;
+- sustentar a promoção manual de modelos.
+
+Relatórios esperados:
+
+```text
+evaluation/reports/model_benchmark_latest.json
+evaluation/reports/model_benchmark_latest.md
+```
+
+## Explicabilidade e Fairness
+
+O projeto também gera um relatório dedicado a explicabilidade e análise de grupo.
+
+Hoje ele cobre:
+
+- importância de features;
+- avaliação por tipo de produto (`L`, `M`, `H`);
+- comparação de precisão;
+- comparação de recall;
+- comparação de false positive rate;
+- comparação de false negative rate.
+
+Essa análise não é uma avaliação de fairness demográfica. Ela é uma análise de consistência operacional entre grupos do dataset.
+
+Relatórios esperados:
+
+```text
+evaluation/reports/explainability_fairness_latest.json
+evaluation/reports/explainability_fairness_latest.md
+```
+
+## Registro no MLflow
+
+O treinamento registra:
+
+- parâmetros;
+- métricas;
+- artefatos;
+- tipo de modelo;
+- versão de features;
+- versão de dados;
+- status de aprovação;
+- nome do candidato.
+
+Aliases usados:
+
+- `candidate`
+- `champion`
+- `previous_champion`
+
+Essa estrutura melhora bastante a governança da plataforma porque separa o melhor modelo treinado do modelo realmente aprovado para produção.
+
+## Serving
+
+O endpoint de predição consome apenas o modelo `champion`.
+
+Fluxo simplificado:
+
+1. recebe a observação;
+2. aplica a engenharia de features;
+3. carrega o modelo aprovado via MLflow;
+4. retorna probabilidade, classe de risco e metadados.
+
+O contrato de serving foi desenhado para funcionar tanto com modelos `scikit-learn` quanto com o challenger em PyTorch, via wrapper `pyfunc` do MLflow.
+
+Isso significa que a API não precisa mudar quando o champion troca de framework.
+
+## Promoção de Modelo
+
+O ciclo de promoção foi desenhado para ter controle humano explícito.
+
+Hoje ele funciona assim:
+
+1. o pipeline treina candidatos;
+2. escolhe o melhor;
+3. registra esse modelo como `candidate`;
+4. marca `approval_status=pending`;
+5. exige benchmark e relatório de fairness/explicabilidade;
+6. depende de aprovação manual para virar `champion`.
+
+Esse processo reduz o risco de colocar em produção um modelo novo sem revisão suficiente.
+
+## Limitações
+
+Algumas limitações importantes do modelo atual:
+
+- o AI4I é um dataset sintético;
+- o comportamento observado pode não representar uma planta industrial real;
+- limiares de risco podem precisar de calibração conforme o contexto do negócio;
+- o modelo é um apoio à decisão, não um sistema de automação industrial.
+
+## Resumo
+
+O modelo da plataforma foi pensado para ser tecnicamente consistente e, ao mesmo tempo, fácil de defender:
+
+- usa um problema bem definido;
+- aplica engenharia de features coerente com o domínio;
+- compara baseline e challengers;
+- registra tudo no MLflow;
+- separa candidato de champion;
+- entra em produção apenas após aprovação humana.

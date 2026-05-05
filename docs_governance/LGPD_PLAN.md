@@ -1,139 +1,179 @@
-# LGPD Plan
+# Plano de LGPD
 
-## Scope
+Este documento resume como a plataforma trata questões de privacidade e proteção de dados no contexto atual do projeto.
 
-This plan covers the Datathon AI Platform for predictive maintenance using the AI4I 2020
-dataset. The current dataset is synthetic machine/process data and does not intentionally
-contain personal data. LGPD risk is therefore low for the model-training dataset, but the
-platform still handles user prompts, logs, traces, and secrets that must be governed carefully.
+O ponto principal é o seguinte: o dataset usado para modelagem é sintético e não foi construído para conter dados pessoais. Mesmo assim, a plataforma inclui chat, logs, traces e integrações externas, então ainda existe responsabilidade de governança.
 
-## Data Inventory
+## Escopo
 
-| Data category | Examples | Personal data? | Location |
-|---|---|---:|---|
-| Raw AI4I dataset | machine identifiers, temperatures, torque, tool wear, failure labels | No | `data/raw/`, DVC |
-| Processed features | engineered sensor/process features | No | `data/processed/`, PostgreSQL |
-| Model artifacts | MLflow model files, metrics, parameters | No | MLflow artifact store |
-| Chat prompts | user messages sent to `/api/v1/chat` | Possible accidental PII | API runtime, optional traces |
-| Logs and metrics | latency, counters, guardrail events, hashed message metadata | Possible metadata | Prometheus, container logs |
-| Secrets | OpenAI key, database credentials, cloud role data | Confidential, not personal data by default | `.env`, cloud secrets |
+O plano cobre a plataforma de manutenção preditiva baseada no dataset AI4I 2020.
 
-## Lawful Basis And Purpose
+Hoje, os maiores pontos de atenção do ponto de vista de LGPD não estão no modelo tabular em si, mas em elementos como:
 
-For the Datathon prototype, the primary data is non-personal synthetic operational data used
-for academic evaluation and technical demonstration. If the platform is adapted to a real
-company environment, lawful basis must be confirmed by that organization before storing chat
-logs or user identifiers.
+- prompts enviados ao chat;
+- logs de aplicação;
+- traces de avaliações com LLM;
+- segredos e credenciais;
+- futura adaptação do projeto para contexto real de empresa.
 
-Allowed purposes:
+## Inventário de Dados
 
-- predictive-maintenance modeling;
-- model and platform evaluation;
-- auditability of model training and promotion;
-- security testing and operational monitoring.
+### Dados do dataset
 
-Disallowed purposes:
+- dataset bruto AI4I em `data/raw/`;
+- datasets processados em `data/processed/`;
+- features persistidas no PostgreSQL.
 
-- employee monitoring;
-- individual profiling;
-- unrelated chat logging;
-- processing CPF, phone, email, health, financial, or legal data.
+Esses dados são sintéticos e representam variáveis de máquina e processo. No estado atual do projeto, eles não são tratados como dados pessoais.
 
-## Data Minimization
+### Dados de interação
 
-The prediction endpoint only requires machine/process fields:
+- mensagens enviadas ao endpoint `/api/v1/chat`;
+- metadados de uso da API;
+- possíveis traces de avaliação do agente.
 
-- product type;
-- air temperature;
-- process temperature;
-- rotational speed;
+Aqui existe risco de entrada acidental de dados pessoais pelo usuário, mesmo que isso não faça parte do objetivo da plataforma.
+
+### Dados técnicos e operacionais
+
+- métricas;
+- logs;
+- artefatos de MLflow;
+- relatórios;
+- segredos de ambiente.
+
+Esses dados não são necessariamente pessoais, mas podem conter informação sensível.
+
+## Finalidade
+
+No estado atual, a finalidade legítima do tratamento é:
+
+- demonstrar uma solução técnica de manutenção preditiva;
+- avaliar modelos e pipelines de MLOps;
+- auditar treinamento, avaliação e promoção;
+- monitorar a operação da plataforma;
+- responder perguntas técnicas sobre o projeto via agente com LLM.
+
+Não faz parte da finalidade:
+
+- monitoramento de pessoas;
+- perfilamento de funcionários;
+- coleta de CPF, e-mail, telefone ou dados biométricos;
+- uso da plataforma para decisões automatizadas sobre indivíduos.
+
+## Minimização de Dados
+
+A plataforma foi desenhada para funcionar com o mínimo necessário.
+
+No endpoint de predição, a entrada é limitada a variáveis de máquina:
+
+- tipo de produto;
+- temperatura do ar;
+- temperatura de processo;
+- rotação;
 - torque;
-- tool wear.
+- desgaste da ferramenta.
 
-No name, CPF, email, phone number, location, or employee identifier is required for prediction.
-The chat assistant is topic-restricted to reduce accidental collection of unrelated personal
-data.
+Nenhum identificador pessoal é necessário para que a plataforma cumpra sua função principal.
 
-## Storage And Retention
+No chat, a política é restringir o assunto para reduzir a chance de a aplicação receber conteúdo irrelevante ou sensível.
 
-| Asset | Retention expectation | Notes |
-|---|---|---|
-| Raw AI4I CSV | versioned for reproducibility | tracked by DVC, not intended for Git blob storage |
-| Processed features | retained for reproducible evaluation | regenerated by ingestion flow |
-| MLflow runs | retained for audit during project lifecycle | includes metrics, params, artifacts, tags |
-| Benchmark/fairness reports | retained as governance evidence | `evaluation/reports/` |
-| Security evaluation reports | retained as governance evidence | `evaluation/reports/security_eval_latest.json` |
-| Chat logs/traces | disabled or minimized unless explicitly required | production needs retention policy |
+## Riscos Principais
 
-Production deployment should define retention windows per environment and purge logs that
-contain accidental personal data.
+No cenário atual, os principais riscos de LGPD são:
 
-## Access Control
+- usuário enviar dados pessoais em prompts do chat;
+- logs conterem texto sensível por acidente;
+- traces ou avaliações com LLM armazenarem conteúdo que não deveria ser persistido;
+- exposição de segredos como chaves de API e senhas.
 
-Current controls:
+O dataset principal, por ser sintético, tem risco baixo sob a ótica de dados pessoais.
 
-- secrets are expected in `.env` locally and cloud secret stores in deployment;
-- GitHub Actions deployment uses OIDC instead of long-lived AWS keys;
-- model promotion requires explicit `approved_by` and `promotion_reason`;
-- production serving reads the approved `champion` model alias.
+## Controles Já Implementados
 
-Production controls still required:
+### Guardrails de entrada
 
-- authenticated API access;
-- role-based access control for model promotion and operational endpoints;
-- separate developer, staging, and production secrets;
-- audit logs for model approval and deployment changes.
+O chat possui verificações para:
 
-## Anonymization And Sanitization
+- bloquear prompt injection;
+- bloquear tentativas de extração de segredos;
+- restringir o assunto ao domínio da plataforma.
 
-Implemented controls:
+Esses controles ajudam não só em segurança, mas também em privacidade, porque reduzem o volume de entradas inadequadas.
 
-- input guardrails block secret extraction attempts and unrelated topics;
-- output guardrails redact OpenAI-like API keys, JWT-like tokens, database URLs, password fields,
-  system prompt leakage, and unsafe automation claims;
-- guardrail events are counted through Prometheus without storing raw prompt text in the metric;
-- `message_hash` uses a short hash for blocked messages instead of exposing full text in
-  metadata.
+### Sanitização de saída
 
-Relevant files:
+A resposta do agente passa por sanitização para reduzir risco de exposição de:
 
-- `src/security/guardrails.py`
-- `data/golden_set/security_eval.jsonl`
-- `evaluation/security_eval.py`
-- `evaluation/reports/security_eval_latest.json`
+- chaves de API;
+- tokens;
+- URLs de banco com credenciais;
+- campos de senha;
+- trechos de prompt interno.
 
-## Data Subject Rights
+### Estrutura de segredos
 
-The current dataset has no identified natural persons. If future chat logs or user accounts are
-stored, the platform owner must support:
+Localmente, o projeto usa `.env`. Em nuvem, a recomendação é usar:
 
-- access requests;
-- correction requests;
-- deletion requests;
-- processing-purpose explanation;
-- retention and audit evidence.
+- secret manager;
+- secrets do pipeline;
+- rotação de credenciais.
 
-## Incident Handling
+### Governança operacional
 
-If personal data or secrets are exposed:
+O projeto já evita alguns comportamentos de risco:
 
-1. revoke and rotate affected credentials;
-2. remove the secret from `.env`, logs, issue trackers, and chat transcripts when possible;
-3. review Git history before pushing public changes;
-4. invalidate affected model, RAG, or evaluation artifacts if they contain sensitive content;
-5. document the incident, scope, remediation, and preventive action;
-6. notify the responsible organization according to its legal and compliance process.
+- promoção manual de modelos;
+- separação entre treino e produção;
+- documentação explícita do uso pretendido;
+- relatórios de avaliação e segurança.
 
-## Residual Risk
+## Retenção
 
-- Users can still type personal data into chat prompts.
-- Managed LLM providers may receive prompts when OpenAI chat is enabled.
-- Local development environments may lack centralized audit controls.
-- Production use needs formal DPA/vendor review, IAM, logging retention, and privacy notices.
+Como este ainda é um projeto de Datathon, a retenção está voltada mais para reprodutibilidade e evidência técnica do que para operação contínua de produção.
 
-## Conclusion
+Na prática:
 
-The current project is low-risk from an LGPD perspective because model data is synthetic
-machine telemetry. The main privacy risk is accidental user-provided personal data in chat or
-logs. The implemented guardrails reduce that risk, but production use requires formal access,
-retention, vendor, and incident-response controls.
+- dados brutos e processados são mantidos para reprodutibilidade;
+- artefatos de MLflow são mantidos como trilha de auditoria;
+- relatórios de benchmark, fairness e segurança são mantidos como evidência;
+- logs e traces devem ser minimizados quando houver conteúdo de usuário.
+
+Em um ambiente real, a retenção deveria ser formalizada por ambiente e por categoria de dado.
+
+## Direitos do Titular
+
+Hoje o dataset principal não representa pessoas identificadas. Ainda assim, se o projeto evoluir para armazenar interações de usuários reais, a organização responsável precisará prever:
+
+- acesso aos dados;
+- correção;
+- exclusão;
+- informação sobre finalidade;
+- política de retenção;
+- registro de consentimento ou outra base legal aplicável, quando necessário.
+
+## Incidentes
+
+Se houver exposição de segredo ou dado pessoal:
+
+1. revogar a credencial ou acesso comprometido;
+2. remover o dado de logs, arquivos e artefatos quando possível;
+3. revisar onde o conteúdo foi persistido;
+4. reavaliar artefatos impactados;
+5. documentar causa, impacto e remediação;
+6. seguir o processo institucional aplicável.
+
+## Limitações Atuais
+
+O projeto ainda tem limitações típicas de um protótipo:
+
+- não possui autenticação forte em todo o ambiente local;
+- pode depender de serviços externos para LLM;
+- não possui política completa de retenção por ambiente;
+- não implementa um fluxo formal de requisição de titular porque não opera, hoje, sobre dados pessoais estruturados.
+
+## Conclusão
+
+Do ponto de vista de LGPD, o risco principal da plataforma atual não está no modelo de manutenção preditiva em si, mas no uso do chat e na gestão de logs, traces e segredos.
+
+O projeto já possui medidas úteis de redução de risco, especialmente guardrails, sanitização e separação de responsabilidades. Para um uso corporativo real, ainda seriam necessários controles adicionais de acesso, retenção, auditoria e gestão de fornecedores.

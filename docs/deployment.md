@@ -1,490 +1,319 @@
-# Deployment Guide — AWS Infrastructure
+# Deploy
 
-Este guia cobre todo o processo de deploy da plataforma na AWS, desde a criação da infraestrutura até o primeiro deploy via GitHub Actions.
+Este documento descreve como o projeto pode ser executado localmente e como a infraestrutura em nuvem foi organizada para deploy na AWS.
 
----
+Ele foi atualizado para refletir o estado atual do projeto, que hoje já possui:
 
-## Pré-requisitos
+- API FastAPI;
+- worker separado para jobs offline;
+- MLflow;
+- PostgreSQL;
+- Qdrant;
+- Prefect;
+- Prometheus e Grafana;
+- workflows de CI/CD;
+- templates CloudFormation.
 
-Ferramentas necessárias na máquina local:
+## Execução Local
 
-| Ferramenta | Versão mínima | Instalação |
-|------------|--------------|------------|
-| AWS CLI | v2 | https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html |
-| GitHub CLI (`gh`) | v2 | https://cli.github.com |
-| Docker | v24 | https://docs.docker.com/get-docker |
-| Python | 3.12 | https://python.org |
+### Pré-requisitos
 
-Contas e acessos necessários:
+Para rodar o projeto localmente, você precisa de:
 
-- **AWS**: conta com permissões de administrador (para criar IAM, VPC, ECS, EFS, S3, ECR, Secrets Manager)
-- **GitHub**: repositório criado, `gh auth login` executado
-- **Tailscale**: conta free em https://tailscale.com — gere uma auth key em Settings → Keys
-- **No-IP**: conta com um hostname DDNS criado em https://www.noip.com
+- Docker e Docker Compose;
+- Python 3.12, caso queira rodar ferramentas locais fora dos containers;
+- arquivo `.env` configurado a partir do `.env.example`.
 
-Configure o AWS CLI antes de começar:
+Se quiser usar chat, embeddings, RAGAS ou LLM-as-judge, também será necessário configurar:
+
+```text
+OPENAI_API_KEY
+```
+
+### Subindo o ambiente
+
+O jeito mais simples de iniciar tudo é:
 
 ```bash
-aws configure
-# AWS Access Key ID: ...
-# AWS Secret Access Key: ...
-# Default region name: us-east-1
-# Default output format: json
+docker compose up --build
 ```
 
----
+Serviços expostos localmente:
 
-## Visão Geral dos Stacks
-
+```text
+Frontend:         http://localhost:5173
+API:              http://localhost:8080
+Swagger:          http://localhost:8080/api/v1/docs
+Prefect:          http://localhost:4200
+MLflow:           http://localhost:5000
+Qdrant:           http://localhost:6333
+Prometheus:       http://localhost:9090
+Grafana:          http://localhost:3000
+PostgreSQL:       localhost:5433
 ```
-01-network  ──►  02-storage  ──►  03-ecr  ──►  04-ecs
-   VPC               EFS             ECR          ECS
-   Subnets           S3              OIDC         Tasks
-   SGs               Secrets         Deploy Role  Services
-   Cloud Map
+
+### Bancos auxiliares
+
+No ambiente local, o mesmo container do PostgreSQL hospeda três bancos:
+
+- `datathon`
+- `prefect`
+- `mlflow`
+
+O serviço `postgres-init` cria os bancos auxiliares quando necessário.
+
+### Serviços do Docker Compose
+
+O `docker-compose.yml` atual já contempla:
+
+- `frontend`
+- `platform_api`
+- `postgres`
+- `postgres-init`
+- `prefect-server`
+- `prefect-worker`
+- `prefect-deployments`
+- `mlflow`
+- `qdrant`
+- `prometheus`
+- `grafana`
+
+Isso permite demonstrar a plataforma de ponta a ponta em ambiente local, com pouca fricção.
+
+## Inicialização da Plataforma
+
+### Deployments do Prefect
+
+Após subir o ambiente, os deployments do Prefect devem ser registrados automaticamente pelo serviço `prefect-deployments`.
+
+Deployments esperados:
+
+```text
+ingest-initial-ai4i-dataset/initial-ai4i-dataset
+ingest-incoming-ai4i-batches/incoming-ai4i-batches
+train-ai4i-failure-classifier/train-ai4i-failure-classifier
+index-rag-documentation/index-rag-documentation
+detect-ai4i-drift/detect-ai4i-drift
 ```
 
-Cada stack exporta outputs consumidos pelo próximo via `!ImportValue`.  
-**A ordem de deploy é obrigatória.**
-
----
-
-## 1. Deploy dos CloudFormation Stacks
-
-Defina as variáveis de ambiente antes de começar:
+Se precisar registrar manualmente:
 
 ```bash
-export AWS_REGION=us-east-1
-export PROJECT=intelligent-maintenance
-
-# Seu usuário ou org no GitHub (ex: everton-vieira)
-export GITHUB_ORG=SEU_USUARIO_GITHUB
-
-# Nome do repositório (ex: intelligent-maintenance-platform)
-export GITHUB_REPO_NAME=intelligent-maintenance-platform
+docker compose run --rm prefect-deployments
 ```
 
-### Stack 1 — Rede
+### Ingestão inicial
 
-Cria VPC, subnets, Internet Gateway, Security Groups e Cloud Map namespace `im.local`.
+Para carregar o dataset base:
 
 ```bash
-aws cloudformation deploy \
-  --region "$AWS_REGION" \
-  --stack-name "${PROJECT}-network" \
-  --template-file infra/cloudformation/01-network.yml \
-  --parameter-overrides \
-      ProjectName="$PROJECT" \
-      Environment=prod \
-  --capabilities CAPABILITY_NAMED_IAM
+docker compose exec prefect-worker ./scripts/run_initial_ingestion_deployment.sh
 ```
 
-Verifique os outputs:
+Ou diretamente:
 
 ```bash
-aws cloudformation describe-stacks \
-  --region "$AWS_REGION" \
-  --stack-name "${PROJECT}-network" \
-  --query "Stacks[0].Outputs" \
-  --output table
+docker compose exec prefect-worker ./scripts/run_initial_ingestion.sh
 ```
 
----
+### Treinamento
 
-### Stack 2 — Storage
-
-Cria EFS (5 access points), S3 (3 buckets) e Secrets Manager (5 secrets com valores placeholder).
+Para disparar o treinamento:
 
 ```bash
-aws cloudformation deploy \
-  --region "$AWS_REGION" \
-  --stack-name "${PROJECT}-storage" \
-  --template-file infra/cloudformation/02-storage.yml \
-  --parameter-overrides \
-      ProjectName="$PROJECT" \
-      Environment=prod \
-  --capabilities CAPABILITY_NAMED_IAM
+docker compose exec prefect-worker ./scripts/run_training_deployment.sh
 ```
 
-> ⚠️ Após este stack, os secrets existem mas com valor `CHANGE_ME`. Você os preencherá na [Seção 2](#2-preencher-os-secrets-na-aws).
-
----
-
-### Stack 3 — ECR + OIDC
-
-Cria os 5 repositórios ECR, o OIDC Provider do GitHub e a IAM Role para o deploy.
+Ou diretamente:
 
 ```bash
-aws cloudformation deploy \
-  --region "$AWS_REGION" \
-  --stack-name "${PROJECT}-ecr" \
-  --template-file infra/cloudformation/03-ecr.yml \
-  --parameter-overrides \
-      ProjectName="$PROJECT" \
-      GitHubOrg="$GITHUB_ORG" \
-      GitHubRepo="$GITHUB_REPO_NAME" \
-  --capabilities CAPABILITY_NAMED_IAM
+docker compose exec prefect-worker ./scripts/run_training.sh
 ```
 
-Anote o ARN do role de deploy (será usado no GitHub):
+### Indexação RAG
+
+Para indexar a documentação:
 
 ```bash
-aws cloudformation describe-stacks \
-  --region "$AWS_REGION" \
-  --stack-name "${PROJECT}-ecr" \
-  --query "Stacks[0].Outputs[?OutputKey=='GitHubActionsDeployRoleArn'].OutputValue" \
-  --output text
+docker compose exec prefect-worker ./scripts/run_rag_indexing_deployment.sh
 ```
 
----
-
-### Stack 4 — ECS
-
-Cria o cluster ECS, todas as task definitions, os 8 services, IAM roles e CloudWatch log groups.
-
-> ⚠️ Execute este stack **somente após** preencher os secrets (Seção 2).  
-> As tasks falharão ao iniciar se os secrets ainda tiverem valor `CHANGE_ME`.
+Ou diretamente:
 
 ```bash
-aws cloudformation deploy \
-  --region "$AWS_REGION" \
-  --stack-name "${PROJECT}-ecs" \
-  --template-file infra/cloudformation/04-ecs.yml \
-  --parameter-overrides \
-      ProjectName="$PROJECT" \
-      Environment=prod \
-      ImageTag=latest \
-  --capabilities CAPABILITY_NAMED_IAM
+docker compose exec prefect-worker ./scripts/run_rag_indexing.sh
 ```
 
-> Na primeira execução, o `ImageTag=latest` ainda não existe nos repositórios ECR.  
-> Os serviços com imagens customizadas ficarão em `PENDING` até o primeiro push.  
-> Os serviços com imagens oficiais (postgres, prefect-server, qdrant) sobem normalmente.
+### Drift
 
----
-
- ## 2. Preencher os Secrets na AWS
-
-Execute o script interativo que pede cada valor e atualiza o Secrets Manager:
+Para rodar a detecção de drift:
 
 ```bash
-export AWS_REGION=us-east-1
-bash infra/scripts/aws-secrets-setup.sh
+docker compose exec prefect-worker ./scripts/run_drift_detection_deployment.sh
 ```
 
-O script pedirá:
-
-| Secret | O que informar |
-|--------|---------------|
-| `POSTGRES_PASSWORD` | Senha forte para o PostgreSQL (mínimo 16 chars) |
-| `OPENAI_API_KEY` | Sua API key da OpenAI (`sk-...`) |
-| `NOIP_USERNAME` | Usuário/e-mail do No-IP |
-| `NOIP_PASSWORD` | Senha do No-IP |
-| `NOIP_HOST` | Hostname DDNS (ex: `minha-api.ddns.net`) |
-| `TS_AUTHKEY` | Auth key do Tailscale (reusável, tag `tag:ecs-private`) |
-| `GF_SECURITY_ADMIN_PASSWORD` | Senha do admin do Grafana |
-
-### Gerar a Tailscale Auth Key
-
-1. Acesse https://login.tailscale.com/admin/settings/keys
-2. Clique em **Generate auth key**
-3. Marque **Reusable** e **No expiry** (ou uma data longa)
-4. Em **Tags**, adicione `tag:ecs-private`
-5. Copie a key gerada
-
-### Configurar ACL no Tailscale
-
-Acesse https://login.tailscale.com/admin/acls e garanta que a tag existe:
-
-```json
-"tagOwners": {
-  "tag:ecs-private": ["autogroup:admin"]
-}
-```
-
----
-
-## 3. Configurar o GitHub
-
-### Configurar Secrets e Variables
+Ou diretamente:
 
 ```bash
-export GITHUB_REPO=${GITHUB_ORG}/${GITHUB_REPO_NAME}
-export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-export AWS_REGION=us-east-1
-
-bash infra/scripts/github-secrets-setup.sh
+docker compose exec prefect-worker ./scripts/run_drift_detection.sh
 ```
 
-O script configura automaticamente via `gh` CLI:
+## Fluxo de Deploy Local
 
-**Secrets** (valores sensíveis — ficam ocultos nos logs):
+O fluxo esperado para preparar a plataforma em ambiente local é:
 
-| Nome | Valor configurado |
-|------|-----------------|
-| `AWS_ROLE_ARN` | ARN do `GitHubActionsDeployRole` (lido do stack 03-ecr) |
+1. subir os serviços com `docker compose up --build`;
+2. verificar se os deployments do Prefect apareceram;
+3. rodar a ingestão inicial;
+4. rodar o treinamento;
+5. promover manualmente um candidato para `champion`, se necessário;
+6. rodar a indexação RAG;
+7. validar API, chat, métricas e dashboards.
 
-**Variables** (valores não-sensíveis — visíveis nos logs):
+## Promoção Manual do Modelo
 
-| Nome | Exemplo de valor |
-|------|----------------|
-| `AWS_ACCOUNT_ID` | `123456789012` |
-| `AWS_REGION` | `us-east-1` |
-| `ECR_API_REPO` | `123456789012.dkr.ecr.us-east-1.amazonaws.com/im/platform-api` |
-| `ECR_WORKER_REPO` | `123456789012.dkr.ecr.us-east-1.amazonaws.com/im/prefect-worker` |
-| `ECR_MLFLOW_REPO` | `123456789012.dkr.ecr.us-east-1.amazonaws.com/im/mlflow` |
-| `ECR_PROMETHEUS_REPO` | `123456789012.dkr.ecr.us-east-1.amazonaws.com/im/prometheus` |
-| `ECR_GRAFANA_REPO` | `123456789012.dkr.ecr.us-east-1.amazonaws.com/im/grafana` |
-| `ECS_CLUSTER` | `intelligent-maintenance-cluster` |
-| `ECS_API_SERVICE` | `platform-api` |
-| `ECS_WORKER_SERVICE` | `prefect-worker` |
+O projeto não promove modelos automaticamente após o treinamento.
 
-Verifique em: `https://github.com/SEU_ORG/SEU_REPO/settings/secrets/actions`
-
----
-
-## 4. Primeiro Deploy (Push de Imagens)
-
-O stack 04-ecs foi criado mas as imagens customizadas ainda não existem no ECR.  
-Crie a primeira tag `prod-` para disparar o workflow de deploy:
+Depois de gerar benchmark, fairness e demais evidências, a promoção pode ser feita assim:
 
 ```bash
-git tag prod-1.0.0
-git push origin prod-1.0.0
+docker compose exec prefect-worker ./scripts/promote_model.sh \
+  --approved-by "felipe" \
+  --reason "Modelo aprovado após revisão de benchmark e fairness"
 ```
 
-O workflow `.github/workflows/deploy.yml` irá:
-1. Autenticar na AWS via OIDC (sem credenciais permanentes)
-2. Fazer login no ECR
-3. Build e push das 5 imagens (`platform-api`, `prefect-worker`, `mlflow`, `prometheus`, `grafana`)
-4. Atualizar as task definitions com a nova tag
-5. Forçar redeploy de todos os services com imagens customizadas
-6. Aguardar `platform-api` e `prefect-worker` estabilizarem
+Isso garante um passo explícito de governança antes de servir o novo modelo em produção.
 
-Acompanhe em: `https://github.com/SEU_ORG/SEU_REPO/actions`
+## Upload de Novos Datasets
 
----
-
-## 5. Tarefas de Inicialização Únicas (Pós-Primeiro Deploy)
-
-Após o primeiro deploy, execute duas tarefas únicas via `aws ecs run-task`.
-
-### 5.1 Criar os bancos de dados no PostgreSQL
+O jeito mais adequado de inserir novos dados no fluxo da plataforma é via API:
 
 ```bash
-CLUSTER="intelligent-maintenance-cluster"
-REGION="us-east-1"
-
-# Obter subnet e SG privado dos outputs do stack network
-SUBNET=$(aws cloudformation describe-stacks \
-  --region "$REGION" \
-  --stack-name intelligent-maintenance-network \
-  --query "Stacks[0].Outputs[?OutputKey=='PublicSubnet1Id'].OutputValue" \
-  --output text)
-
-SG=$(aws cloudformation describe-stacks \
-  --region "$REGION" \
-  --stack-name intelligent-maintenance-network \
-  --query "Stacks[0].Outputs[?OutputKey=='SGPrivateId'].OutputValue" \
-  --output text)
-
-# Executar task de init
-aws ecs run-task \
-  --region "$REGION" \
-  --cluster "$CLUSTER" \
-  --task-definition intelligent-maintenance-postgres-init \
-  --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[${SUBNET}],securityGroups=[${SG}],assignPublicIp=ENABLED}" \
-  --count 1
+curl -X POST "http://localhost:8080/api/v1/datasets/upload" \
+  -F "file=@data/incoming/example_batch.csv" \
+  -F "trigger_ingestion=true"
 ```
 
-Acompanhe os logs em CloudWatch: `/ecs/im/postgres` (stream prefix: `init`)
+Esse endpoint:
 
-### 5.2 Registrar os Prefect Deployments
+- valida o CSV;
+- salva o arquivo em `data/incoming/`;
+- registra metadados do upload;
+- pode disparar o deployment de ingestão.
 
-```bash
-aws ecs run-task \
-  --region "$REGION" \
-  --cluster "$CLUSTER" \
-  --task-definition intelligent-maintenance-prefect-deployments \
-  --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[${SUBNET}],securityGroups=[${SG}],assignPublicIp=ENABLED}" \
-  --count 1
+Importante: upload de dataset não implica retreinamento ou promoção automática.
+
+## Qualidade e CI/CD
+
+### CI
+
+O projeto possui workflow de CI com GitHub Actions para:
+
+- `ruff`;
+- `mypy`;
+- `bandit`;
+- `pytest` com cobertura;
+- validação de build das imagens Docker.
+
+### Avaliações LLM
+
+Há um workflow separado para avaliação LLM, voltado para os casos em que o projeto precisa rodar:
+
+- agent evaluation;
+- RAGAS;
+- LLM-as-judge.
+
+Como essas avaliações dependem de chave da OpenAI e de custo externo, elas ficam separadas do pipeline básico de CI.
+
+### Deploy
+
+O workflow de deploy está preparado para ambiente AWS usando:
+
+- GitHub Actions;
+- OIDC;
+- ECR;
+- ECS/Fargate;
+- CloudFormation.
+
+Isso evita o uso de chaves AWS permanentes no repositório.
+
+## Infraestrutura AWS
+
+### Organização dos stacks
+
+Os templates de infraestrutura estão em:
+
+- [01-network.yml](/home/felipe_malaquias/Repositories/FIAP-5/datathon-ai-platform/infra/cloudformation/01-network.yml)
+- [02-storage.yml](/home/felipe_malaquias/Repositories/FIAP-5/datathon-ai-platform/infra/cloudformation/02-storage.yml)
+- [03-ecr.yml](/home/felipe_malaquias/Repositories/FIAP-5/datathon-ai-platform/infra/cloudformation/03-ecr.yml)
+- [04-ecs.yml](/home/felipe_malaquias/Repositories/FIAP-5/datathon-ai-platform/infra/cloudformation/04-ecs.yml)
+
+A ordem de deploy dos stacks é:
+
+```text
+rede -> storage -> ECR/OIDC -> ECS
 ```
 
-Acompanhe os logs em CloudWatch: `/ecs/im/prefect-worker` (stream prefix: `deployments`)
+### O que a infraestrutura cobre
 
----
+A infraestrutura foi preparada para hospedar:
 
-## 6. Upload do Dataset Inicial para S3
+- API pública;
+- worker do Prefect;
+- PostgreSQL;
+- MLflow;
+- Prefect server;
+- Qdrant;
+- Prometheus;
+- Grafana;
+- buckets S3;
+- ECR;
+- secrets;
+- roles de deploy.
 
-```bash
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+### Ponto importante sobre a nuvem
 
-aws s3 cp data/raw/ai4i2020.csv \
-  s3://im-data-${ACCOUNT_ID}/raw/ai4i2020.csv
-```
+Apesar de a OpenAI ser um serviço gerenciado, o restante da plataforma foi pensado para ser relativamente portátil. Ou seja: a base operacional principal continua rodando em componentes padrão de mercado, sem depender de um stack excessivamente fechado.
 
----
+## Estratégia de Imagens
 
-## 7. Acessar os Serviços via Tailscale
+As imagens foram separadas por responsabilidade:
 
-Após o deploy, instale o Tailscale no seu computador:  
-https://tailscale.com/download
+- `Dockerfile.api`: runtime online;
+- `Dockerfile.worker`: jobs offline;
+- `Dockerfile.mlflow`: registry e tracking;
+- `Dockerfile.prometheus`: monitoramento;
+- `Dockerfile.grafana`: visualização.
 
-Faça login na mesma conta usada para gerar a auth key. Os containers privados aparecerão automaticamente como dispositivos na sua rede Tailscale.
+Essa separação é importante porque:
 
-| Serviço | Endereço Tailscale | Porta |
-|---------|-------------------|-------|
-| PostgreSQL | `im-postgres` | 5432 |
-| MLflow UI | `im-mlflow` | 5000 |
-| Prefect UI | `im-prefect` | 4200 |
-| Qdrant UI | `im-qdrant` | 6333 |
-| Prometheus | `im-prometheus` | 9090 |
-| Grafana | `im-grafana` | 3000 |
+- reduz acoplamento entre serving e processamento;
+- deixa a arquitetura mais defensável;
+- evita inflar a imagem da API com dependências de treinamento;
+- melhora a clareza operacional.
 
-Exemplos de acesso:
+## Observações Operacionais
 
-```bash
-# Abrir MLflow UI no browser
-open http://im-mlflow:5000
+### Segredos
 
-# Conectar ao PostgreSQL com psql
-psql -h im-postgres -U datathon -d datathon
+Segredos como `OPENAI_API_KEY`, senhas de banco e credenciais de nuvem não devem ficar em arquivos versionados. Localmente eles ficam no `.env`; em cloud, devem ficar em secret managers ou secrets do pipeline.
 
-# Criar banco prefect (se não rodou o RunTask)
-psql -h im-postgres -U datathon -c "CREATE DATABASE prefect;" || true
-psql -h im-postgres -U datathon -c "CREATE DATABASE mlflow;"  || true
-```
+### Estado da plataforma
 
-A API pública é acessada pelo hostname No-IP configurado:
+Para uma demonstração completa, o ideal é garantir estes pontos antes da apresentação:
 
-```bash
-curl http://SEU_HOST.ddns.net:8000/api/v1/health
-```
+1. dataset inicial ingerido;
+2. modelo `champion` disponível no MLflow;
+3. Qdrant indexado;
+4. relatório de drift disponível;
+5. Prometheus e Grafana funcionando;
+6. chat com chave da OpenAI configurada.
 
----
+## Resumo
 
-## 8. Ciclo de Deploy (Deploys Subsequentes)
+Hoje a plataforma já possui um caminho de deploy bem definido:
 
-A cada novo deploy, crie uma tag com prefixo `prod-`:
+- localmente com Docker Compose, pronto para demonstração;
+- em nuvem com AWS, usando infraestrutura declarativa e pipeline de deploy.
 
-```bash
-# Exemplos válidos:
-git tag prod-1.1.0 && git push origin prod-1.1.0
-git tag prod-2025-05-10 && git push origin prod-2025-05-10
-```
-
-O workflow de deploy **não dispara** em commits diretos — apenas em tags `prod-*`.  
-O CI (lint + testes + build validation) roda em todo push e pull request.
-
----
-
-## 9. Atualizar a Infraestrutura
-
-Para alterar qualquer stack CloudFormation:
-
-```bash
-# Edite o template desejado e re-execute o deploy
-aws cloudformation deploy \
-  --region "$AWS_REGION" \
-  --stack-name "${PROJECT}-ecs" \
-  --template-file infra/cloudformation/04-ecs.yml \
-  --parameter-overrides ProjectName="$PROJECT" Environment=prod ImageTag=latest \
-  --capabilities CAPABILITY_NAMED_IAM
-```
-
-O CloudFormation calcula automaticamente o diff e aplica apenas as mudanças necessárias.
-
----
-
-## 10. Estimativa de Custo Mensal (us-east-1)
-
-> Preços de referência: Fargate `$0,04048/vCPU-hora` e `$0,004445/GB-hora` (720h/mês).  
-> Valores aproximados para ambiente rodando 24/7.
-
-### ECS Fargate — Tasks
-
-| Serviço | vCPU | Mem | Custo/mês |
-|---------|------|-----|----------|
-| `platform-api` | 0,5 | 1 GB | ~$18 |
-| `postgres` | 0,5 | 1 GB | ~$18 |
-| `prefect-server` | 0,5 | 1 GB | ~$18 |
-| `prefect-worker` | 1,0 | 2 GB | ~$36 |
-| `qdrant` | 0,5 | 1 GB | ~$18 |
-| `mlflow` | 0,25 | 0,5 GB | ~$9 |
-| `prometheus` | 0,25 | 0,5 GB | ~$9 |
-| `grafana` | 0,25 | 0,5 GB | ~$9 |
-| **Subtotal ECS** | | | **~$135/mês** |
-
-### Outros Recursos
-
-| Recurso | Detalhe | Custo/mês |
-|---------|---------|----------|
-| EFS | ~20 GB, 5 access points (`$0,30/GB`) | ~$6 |
-| S3 | ~20 GB total (`$0,023/GB`) | ~$0,50 |
-| ECR | ~5 GB de imagens (`$0,10/GB`) | ~$0,50 |
-| Secrets Manager | 5 secrets (`$0,40/secret`) | ~$2 |
-| CloudWatch Logs | 8 grupos, retenção 14 dias | ~$5 |
-| Cloud Map | 5 serviços DNS (`$0,10k/queries`) | ~$1 |
-| Internet Gateway | Transferência de dados saída | ~$1 |
-| Tailscale | Plano free (até 3 usuários / 100 devices) | **$0** |
-| GitHub Actions | 2.000 min/mês gratuitos (público) | **$0** |
-| **Subtotal outros** | | **~$16/mês** |
-
-### Total Estimado
-
-| Cenário | Custo/mês |
-|---------|----------|
-| **Todos os serviços 24/7** | **~$151/mês** |
-| Economia: parar `prometheus` + `grafana` fora do horário comercial (12h/dia) | ~$127/mês |
-| Economia: parar todos os serviços privados à noite (8h/dia útil apenas) | ~$70/mês |
-
-### Como parar serviços para economizar
-
-```bash
-# Parar um serviço (zera o DesiredCount)
-aws ecs update-service \
-  --cluster intelligent-maintenance-cluster \
-  --service prometheus \
-  --desired-count 0
-
-# Religar
-aws ecs update-service \
-  --cluster intelligent-maintenance-cluster \
-  --service prometheus \
-  --desired-count 1
-```
-
-> **Atenção:** parar `postgres` apaga as conexões ativas mas os dados persistem no EFS.  
-> Parar `prefect-server` interrompe o agendamento de flows.
-
----
-
-## 11. Referência — Recursos Criados por Stack
-
-### Stack 01-network
-- VPC `10.0.0.0/16` com 2 subnets públicas (AZ-a e AZ-b)
-- Internet Gateway + Route Table
-- `SG-1` (public): inbound TCP 8000 de `0.0.0.0/0` — usado por `platform-api`
-- `SG-2` (private): sem inbound da internet — usado por todos os serviços internos
-- `SG-EFS`: inbound NFS 2049 de SG-1 e SG-2 — usado pelos mount targets do EFS
-- Cloud Map namespace `im.local` (DNS privado interno)
-
-### Stack 02-storage
-- EFS com 5 access points: `postgres`, `qdrant`, `prometheus`, `grafana`, `reports`
-- S3: `im-data-ACCOUNT`, `im-artifacts-ACCOUNT`, `im-cfn-ACCOUNT`
-- Secrets Manager: `im/db-password`, `im/openai`, `im/noip`, `im/tailscale`, `im/grafana`
-
-### Stack 03-ecr
-- ECR: `im/platform-api`, `im/prefect-worker`, `im/mlflow`, `im/prometheus`, `im/grafana`
-- IAM OIDC Provider para `token.actions.githubusercontent.com`
-- IAM Role `intelligent-maintenance-github-deploy-role` (assume via OIDC em tags `prod-*`)
-
-### Stack 04-ecs
-- ECS Cluster `intelligent-maintenance-cluster`
-- 8 ECS Services: `platform-api`, `postgres`, `mlflow`, `prefect-server`, `prefect-worker`, `qdrant`, `prometheus`, `grafana`
-- 2 task definitions de inicialização: `postgres-init`, `prefect-deployments`
-- IAM Roles: `ECSTaskExecutionRole`, `PlatformAPITaskRole`, `PrivateServicesTaskRole`
-- CloudWatch Log Groups: `/ecs/im/*` (retenção 14 dias)
-- Cloud Map services: `postgres`, `mlflow`, `prefect-server`, `qdrant`, `platform-api`
+Essa combinação ajuda bastante porque dá velocidade para desenvolvimento local e, ao mesmo tempo, mostra uma arquitetura séria o bastante para um cenário mais próximo de produção.
